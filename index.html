@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>金属块实时追踪与加速度计</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
+        #container { position: relative; width: 100vw; height: 65vh; max-width: 640px; margin: 0 auto; background: #000; }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        #dashboard { height: 35vh; padding: 15px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; }
+        .data-box { font-size: 26px; font-weight: bold; color: #00ffff; margin: 5px 0; }
+        .sub-data { font-size: 16px; color: #aaa; margin-bottom: 15px; }
+        button { padding: 15px 30px; font-size: 18px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,255,255,0.3); }
+        .slider-container { margin: 10px auto; width: 80%; display: flex; justify-content: space-between; align-items: center; }
+        input[type=range] { width: 70%; }
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="dashboard">
+        <button id="startBtn">开始追踪金属块</button>
+        <div id="controls" style="display:none;">
+            <div class="slider-container">
+                <label>金属亮度门限:</label>
+                <input type="range" id="thresholdSlider" min="50" max="230" value="150">
+                <span id="sliderVal">150</span>
+            </div>
+            <div class="data-box">实时加速度: <span id="accel-val">0.00</span> px/s²</div>
+            <div class="sub-data">当前速度: <span id="speed-val">0.00</span> px/s</div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const accelVal = document.getElementById('accel-val');
+        const speedVal = document.getElementById('speed-val');
+        const startBtn = document.getElementById('startBtn');
+        const thresholdSlider = document.getElementById('thresholdSlider');
+        const sliderVal = document.getElementById('sliderVal');
+        const controls = document.getElementById('controls');
+
+        let lastTime = performance.now();
+        let lastPos = null;
+        let lastVelocity = 0;
+        let isTracking = false;
+        let targetThreshold = 150;
+
+        thresholdSlider.addEventListener('input', (e) => {
+            targetThreshold = parseInt(e.target.value);
+            sliderVal.innerText = targetThreshold;
+        });
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+                startBtn.style.display = 'none';
+                controls.style.display = 'block';
+                isTracking = true;
+                
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    requestAnimationFrame(trackLoop);
+                };
+            } catch (err) {
+                alert("无法获取相机权限: " + err.message);
+            }
+        });
+
+        function trackLoop() {
+            if (!isTracking) return;
+
+            // 1. 绘制当前视频帧
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = frame.data;
+
+            let sumX = 0, sumY = 0, count = 0;
+
+            // 2. 图像处理：针对金属块的亮度/灰度过滤
+            // 金属块通常较亮（反光）或与背景有明显明暗差
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+
+                // 计算灰度值（亮度）
+                const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+                // 如果金属块反光强烈，筛选高亮度区域；如果金属块发暗，可以反向筛选
+                // 这里以“高亮/反光金属块”为例（可在页面滑动条动态调节）
+                if (gray > targetThreshold) {
+                    const pixelIndex = i / 4;
+                    const x = pixelIndex % canvas.width;
+                    const y = Math.floor(pixelIndex / canvas.width);
+                    
+                    sumX += x;
+                    sumY += y;
+                    count++;
+                }
+            }
+
+            const currentTime = performance.now();
+            const dt = (currentTime - lastTime) / 1000; // 秒
+
+            // 3. 物理计算
+            if (count > 100 && count < (data.length / 4) * 0.4 && dt > 0) { 
+                // 限制 count 上限，防止把整个背景当成目标
+                const currentPos = { x: sumX / count, y: sumY / count };
+
+                // 绘制追踪十字靶心
+                ctx.beginPath();
+                ctx.arc(currentPos.x, currentPos.y, 15, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(currentPos.x - 25, currentPos.y); ctx.lineTo(currentPos.x + 25, currentPos.y);
+                ctx.moveTo(currentPos.x, currentPos.y - 25); ctx.lineTo(currentPos.x, currentPos.y + 25);
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                if (lastPos) {
+                    const dx = currentPos.x - lastPos.x;
+                    const dy = currentPos.y - lastPos.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    // 速度 (px/s)
+                    const currentVelocity = distance / dt;
+
+                    // 加速度 (px/s²)
+                    const acceleration = (currentVelocity - lastVelocity) / dt;
+
+                    // 一阶低通滤波，消除金属闪烁带来的瞬时跳变
+                    const smoothedVelocity = currentVelocity * 0.2 + (parseFloat(speedVal.innerText) || 0) * 0.8;
+                    const smoothedAccel = acceleration * 0.15 + (parseFloat(accelVal.innerText) || 0) * 0.85;
+
+                    speedVal.innerText = smoothedVelocity.toFixed(2);
+                    accelVal.innerText = Math.abs(smoothedAccel).toFixed(2);
+
+                    lastVelocity = currentVelocity;
+                }
+                lastPos = currentPos;
+            } else {
+                // 未识别到目标时，缓慢衰减，防止数据直接归零抖动
+                lastVelocity *= 0.5;
+                if(lastVelocity < 1) lastVelocity = 0;
+                speedVal.innerText = lastVelocity.toFixed(2);
+            }
+
+            lastTime = currentTime;
+            requestAnimationFrame(trackLoop);
+        }
+    </script>
+</body>
+</html>
