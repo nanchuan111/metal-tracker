@@ -3,17 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>金属块实时追踪与加速度计</title>
+    <title>金属块实时追踪与加速度计 (m/s²)</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
-        #container { position: relative; width: 100vw; height: 65vh; max-width: 640px; margin: 0 auto; background: #000; }
+        #container { position: relative; width: 100vw; height: 60vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 35vh; padding: 15px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; }
-        .data-box { font-size: 26px; font-weight: bold; color: #00ffff; margin: 5px 0; }
-        .sub-data { font-size: 16px; color: #aaa; margin-bottom: 15px; }
+        #dashboard { height: 40vh; padding: 15px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; }
+        .data-box { font-size: 32px; font-weight: bold; color: #00ffff; margin: 10px 0; }
+        .sub-data { font-size: 18px; color: #aaa; margin-bottom: 15px; }
         button { padding: 15px 30px; font-size: 18px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,255,255,0.3); }
         .slider-container { margin: 10px auto; width: 80%; display: flex; justify-content: space-between; align-items: center; }
-        input[type=range] { width: 70%; }
+        input[type=range] { width: 65%; }
     </style>
 </head>
 <body>
@@ -28,11 +28,11 @@
         <div id="controls" style="display:none;">
             <div class="slider-container">
                 <label>金属亮度门限:</label>
-                <input type="range" id="thresholdSlider" min="50" max="230" value="150">
-                <span id="sliderVal">150</span>
+                <input type="range" id="thresholdSlider" min="50" max="230" value="180">
+                <span id="sliderVal">180</span>
             </div>
-            <div class="data-box">实时加速度: <span id="accel-val">0.00</span> px/s²</div>
-            <div class="sub-data">当前速度: <span id="speed-val">0.00</span> px/s</div>
+            <div class="data-box">实时加速度: <span id="accel-val">0.00</span> m/s²</div>
+            <div class="sub-data">当前速度: <span id="speed-val">0.00</span> m/s</div>
         </div>
     </div>
 
@@ -47,11 +47,20 @@
         const sliderVal = document.getElementById('sliderVal');
         const controls = document.getElementById('controls');
 
+        // --- 【核心物理参数配置】 ---
+        // 手机距离物体 20cm 时画面放大：1厘米约为 32 像素，故 1米 = 3200 像素
+        const PX_PER_METER = 3200; 
+        
         let lastTime = performance.now();
         let lastPos = null;
         let lastVelocity = 0;
         let isTracking = false;
-        let targetThreshold = 150;
+        let targetThreshold = 180; // 默认调高初始门限，更适合抓取金属反光
+
+        // 0.5秒定时显示缓存
+        let currentRealSpeed = 0;
+        let currentRealAccel = 0;
+        let lastDisplayTime = performance.now();
 
         thresholdSlider.addEventListener('input', (e) => {
             targetThreshold = parseInt(e.target.value);
@@ -82,32 +91,23 @@
         function trackLoop() {
             if (!isTracking) return;
 
-            // 1. 绘制当前视频帧
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const data = frame.data;
 
             let sumX = 0, sumY = 0, count = 0;
 
-            // 2. 图像处理：针对金属块的亮度/灰度过滤
-            // 金属块通常较亮（反光）或与背景有明显明暗差
             for (let i = 0; i < data.length; i += 4) {
                 const r = data[i];
                 const g = data[i + 1];
                 const b = data[i + 2];
-
-                // 计算灰度值（亮度）
                 const gray = 0.299 * r + 0.587 * g + 0.114 * b;
 
-                // 如果金属块反光强烈，筛选高亮度区域；如果金属块发暗，可以反向筛选
-                // 这里以“高亮/反光金属块”为例（可在页面滑动条动态调节）
+                // 筛选超过门限的高亮金属区域
                 if (gray > targetThreshold) {
                     const pixelIndex = i / 4;
-                    const x = pixelIndex % canvas.width;
-                    const y = Math.floor(pixelIndex / canvas.width);
-                    
-                    sumX += x;
-                    sumY += y;
+                    sumX += pixelIndex % canvas.width;
+                    sumY += Math.floor(pixelIndex / canvas.width);
                     count++;
                 }
             }
@@ -115,12 +115,11 @@
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000; // 秒
 
-            // 3. 物理计算
-            if (count > 100 && count < (data.length / 4) * 0.4 && dt > 0) { 
-                // 限制 count 上限，防止把整个背景当成目标
+            // 过滤噪点：确保识别区域大小合理
+            if (count > 50 && count < (data.length / 4) * 0.3 && dt > 0) { 
                 const currentPos = { x: sumX / count, y: sumY / count };
 
-                // 绘制追踪十字靶心
+                // 绘制高亮追踪十字靶心
                 ctx.beginPath();
                 ctx.arc(currentPos.x, currentPos.y, 15, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#00ffff';
@@ -128,8 +127,8 @@
                 ctx.stroke();
                 
                 ctx.beginPath();
-                ctx.moveTo(currentPos.x - 25, currentPos.y); ctx.lineTo(currentPos.x + 25, currentPos.y);
-                ctx.moveTo(currentPos.x, currentPos.y - 25); ctx.lineTo(currentPos.x, currentPos.y + 25);
+                ctx.moveTo(currentPos.x - 20, currentPos.y); ctx.lineTo(currentPos.x + 20, currentPos.y);
+                ctx.moveTo(currentPos.x, currentPos.y - 20); ctx.lineTo(currentPos.x, currentPos.y + 20);
                 ctx.strokeStyle = '#00ffff';
                 ctx.lineWidth = 1;
                 ctx.stroke();
@@ -137,29 +136,37 @@
                 if (lastPos) {
                     const dx = currentPos.x - lastPos.x;
                     const dy = currentPos.y - lastPos.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const distancePx = Math.sqrt(dx * dx + dy * dy);
 
-                    // 速度 (px/s)
-                    const currentVelocity = distance / dt;
+                    // 1. 像素到位移转换（公制单位）
+                    const distanceMeters = distancePx / PX_PER_METER;
 
-                    // 加速度 (px/s²)
-                    const acceleration = (currentVelocity - lastVelocity) / dt;
+                    // 2. 物理公式计算速度与加速度
+                    const velocityMetersPerSec = distanceMeters / dt;
+                    const accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
 
-                    // 一阶低通滤波，消除金属闪烁带来的瞬时跳变
-                    const smoothedVelocity = currentVelocity * 0.2 + (parseFloat(speedVal.innerText) || 0) * 0.8;
-                    const smoothedAccel = acceleration * 0.15 + (parseFloat(accelVal.innerText) || 0) * 0.85;
+                    // 3. 一阶低通滤波：抗抖动平滑处理
+                    currentRealSpeed = velocityMetersPerSec * 0.25 + currentRealSpeed * 0.75;
+                    
+                    let rawAccel = Math.abs(accelMetersPerSec2);
+                    if (rawAccel < 0.15) rawAccel = 0; // 过滤手持微小抖动的死区
+                    currentRealAccel = rawAccel * 0.15 + currentRealAccel * 0.85;
 
-                    speedVal.innerText = smoothedVelocity.toFixed(2);
-                    accelVal.innerText = Math.abs(smoothedAccel).toFixed(2);
-
-                    lastVelocity = currentVelocity;
+                    lastVelocity = velocityMetersPerSec;
                 }
                 lastPos = currentPos;
             } else {
-                // 未识别到目标时，缓慢衰减，防止数据直接归零抖动
-                lastVelocity *= 0.5;
-                if(lastVelocity < 1) lastVelocity = 0;
-                speedVal.innerText = lastVelocity.toFixed(2);
+                // 失去目标时速度自然衰减
+                currentRealSpeed *= 0.4;
+                if(currentRealSpeed < 0.02) currentRealSpeed = 0;
+                lastVelocity = 0;
+            }
+
+            // --- 【核心：每隔 0.5 秒 (500毫秒) 刷新一次前端 UI】 ---
+            if (currentTime - lastDisplayTime >= 500) { 
+                speedVal.innerText = currentRealSpeed.toFixed(2);
+                accelVal.innerText = currentRealAccel.toFixed(2);
+                lastDisplayTime = currentTime;
             }
 
             lastTime = currentTime;
