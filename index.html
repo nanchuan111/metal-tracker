@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>保温箱：手动点击追踪与图像生成系统</title>
+    <title>保温箱：质心锁定高稳版系统 v3.3</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 50vh; max-width: 640px; margin: 0 auto; background: #000; overflow: hidden; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #click-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; } /* 手动点击层 */
+        #click-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
         #dashboard { height: 50vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; overflow-y: auto; }
+        .data-row { display: flex; justify-content: space-around; margin: 5px 0; align-items: center; }
         .data-box { font-size: 28px; font-weight: bold; color: #00ffff; margin: 8px 0; }
         .sub-data { font-size: 16px; color: #aaa; margin-bottom: 10px; }
-        .status-panel { background: rgba(0,255,255,0.1); border: 1px solid #00ffff; border-radius: 8px; padding: 8px; font-size: 14px; color: #00ffff; margin: 8px 0; }
         button { padding: 12px 25px; font-size: 18px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; }
         #chart-container { width: 95%; max-width: 600px; height: 180px; margin: 10px auto; background: #222; border-radius: 8px; padding: 5px; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
@@ -31,15 +31,17 @@
         <div id="click-overlay"></div> </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none;">开始追踪系统</button>
+        <button id="startBtn" style="display:none;">开始高稳追踪系统</button>
         <div id="controls" style="display:none;">
             
-            <div class="status-panel">已启用专属：点击屏幕可手动指定方块追踪目标。其余金属已忽略。</div>
-
-            <div class="data-box">实时加速度: <span id="accel-val">0.00</span> m/s²
-                <span class="engine-tag">数据平滑已启用 | ＞100归零</span>
+            <div class="data-box">
+                实时加速度: <span id="accel-val">0.00</span> m/s²
+                <span class="engine-tag">数据平滑已启用 | ＞100归零 | 舍弃边缘处理</span>
             </div>
-            <div class="sub-data">当前速度: <span id="speed-val">0.00</span> m/s</div>
+            <div class="data-row">
+                <div class="sub-data">当前速度: <span id="speed-val">0.00</span> m/s</div>
+                <div class="sub-data" style="color: #ffcc00; font-weight: bold;">物理校准: 距离 12-15cm (2cm目标)</div>
+            </div>
 
             <div id="chart-container">
                 <canvas id="accelChart"></canvas>
@@ -64,25 +66,25 @@
         let lastPos = null;
         let lastVelocity = 0;
         let isTracking = false;
-        let manualDesignationPoint = null; // 手动点击的种子点
+        let manualDesignationPoint = null; 
 
-        // 用于平滑和异常处理
+        // 异常数据处理
         let recentAccels = []; 
         const MAX_HISTORY = 5;  
         const ERROR_THRESHOLD = 12.0; 
 
-        // 刷新与图像生成控制
+        // 显示控制
         let currentRealSpeed = 0;
         let currentRealAccel = 0;
         let lastDisplayTime = performance.now();
 
-        // 图表实例和数据
+        // 图像生成
         let chartInstance;
-        let chartLabels = Array(25).fill(''); // 保持25个时间点宽度
+        let chartLabels = Array(25).fill(''); 
         let chartData = Array(25).fill(0);   
 
         // OpenCV 内存变量
-        let src, gray, blurred, edges, contours, hierarchy, approx;
+        let src, gray, blurred, thresholded, hierarchy, approx;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
@@ -126,12 +128,12 @@
                     scales: {
                         y: {
                             min: 0,
-                            max: 120, // 量程设为120以清晰展现100
+                            max: 120, 
                             grid: { color: '#333' },
                             ticks: { 
                                 color: '#aaa',
                                 callback: function(value) {
-                                    if(value === 100) return '100 (熔断)';
+                                    if(value === 100) return '100 (归零)';
                                     return value;
                                 }
                             }
@@ -143,29 +145,14 @@
             });
         }
 
-        // --- 【手动指定追踪目标的交互逻辑】 ---
+        // 接收手动点击
         clickOverlay.addEventListener('click', (e) => {
             if (!isTracking) return;
-
-            // 获取点击位置相对于 canvas 的坐标
             const rect = canvas.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const clickY = e.clientY - rect.top;
-
-            // 专属模式：如果画面中已经有金属块，且点击点靠近它的几何轮廓线
-            if (manualDesignationPoint) {
-                const distToLastPos = Math.sqrt(Math.pow(clickX - lastPos.x, 2) + Math.pow(clickY - lastPos.y, 2));
-                // 如果点击点靠近旧目标（来自图3，例如银色立方体），忽略新点击，保持锁定
-                if (distToLastPos < 40) return;
-            }
-
-            // 更新专属模式点击点
-            manualDesignationPoint = { x: clickX, y: clickY };
-            lastVelocity = 0; // 点击后重置速度以防突变
-            
-            // 可选：在前端画布上画一个点击确认的标记
+            manualDesignationPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            lastVelocity = 0;
             ctx.beginPath();
-            ctx.arc(clickX, clickY, 10, 0, 2 * Math.PI);
+            ctx.arc(manualDesignationPoint.x, manualDesignationPoint.y, 10, 0, 2 * Math.PI);
             ctx.fillStyle = 'rgba(0,255,255,0.4)';
             ctx.fill();
         });
@@ -179,7 +166,7 @@
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 controls.style.display = 'block';
-                initChart(); // 初始化生成图像
+                initChart(); 
 
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
@@ -187,8 +174,7 @@
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
                     gray = new cv.Mat();
                     blurred = new cv.Mat();
-                    edges = new cv.Mat();
-                    contours = new cv.MatVector();
+                    thresholded = new cv.Mat();
                     hierarchy = new cv.Mat();
                     approx = new cv.Mat();
                     isTracking = true;
@@ -206,33 +192,40 @@
             src.data.set(imageData.data);
 
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-            // 保温箱专属模糊预处理
-            cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0, 0, cv.BORDER_DEFAULT);
-            // 坎尼边缘提取针对淡蓝色反光背景进行了优化
-            cv.Canny(blurred, edges, 190, 280);
-            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            // 针对保温箱强反光增强模糊，降低反光干扰
+            cv.GaussianBlur(gray, blurred, new cv.Size(11, 11), 0, 0, cv.BORDER_DEFAULT);
+            
+            // --- 【专属模式：舍弃边缘检测，转为质心锁定核心逻辑】 ---
+            // 降低阈值并使用全局阈值化，转为质量质心锁定
+            cv.threshold(blurred, thresholded, 140, 255, cv.THRESH_BINARY);
+            
+            // 使用 findContours 但仅用于计算质心，忽略具体的形状约束
+            cv.findContours(thresholded, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let currentPos = null;
             
-            // 如果用户点击了“种子点”，则优先寻找靠近它的几何形状
+            // 优先锁定靠近点击种子点（来自图3，例如银色立方体）的质量中心
             if (manualDesignationPoint) {
                 let bestCnt = null;
                 let minDist = Infinity;
+                let contoursVector = new cv.MatVector();
                 for (let i = 0; i < contours.size(); ++i) {
                     let cnt = contours.get(i);
                     let area = cv.contourArea(cnt);
-                    // 12-15cm 下的面积和形状约束
+                    // 12-15cm 下的面积约束依然有效（600 ~ 15000像素）
                     if (area > 600 && area < 15000) {
                         let perimeter = cv.arcLength(cnt, true);
-                        cv.approxPolyDP(cnt, approx, 0.04 * perimeter, true);
-                        if (approx.rows === 4 && cv.isContourConvex(approx)) {
+                        // 进行形状逼近，确保它至少像一个方块
+                        cv.approxPolyDP(cnt, approx, 0.05 * perimeter, true);
+                        if (approx.rows >= 4 && cv.isContourConvex(approx)) {
                             let rect = cv.boundingRect(cnt);
-                            if (area / (rect.width * rect.height) > 0.82) { // Solidity
+                            // Solidity solidity > 0.78，放宽宽容度
+                            if (area / (rect.width * rect.height) > 0.78) {
                                 let M = cv.moments(cnt, false);
                                 if (M.m00 !== 0) {
                                     let center = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
                                     const dist = Math.sqrt(Math.pow(center.x - manualDesignationPoint.x, 2) + Math.pow(center.y - manualDesignationPoint.y, 2));
-                                    // 找到距离点击种子点最近的、符合特征的几何轮廓
+                                    // 找到距离点击种子点最近的几何重心
                                     if (dist < 80 && dist < minDist) {
                                         minDist = dist;
                                         bestCnt = cnt;
@@ -243,13 +236,15 @@
                         }
                     }
                 }
+                contoursVector.delete();
             }
 
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
+            // 高高稳物理质心锁定与数据处理
             if (currentPos && dt > 0) {
-                // 绘制高科技准星 (双环十字)
+                // 绘制高科技青色准星 (双环十字)
                 ctx.beginPath();
                 ctx.arc(currentPos.x, currentPos.y, 24, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#00ffff';
@@ -269,7 +264,7 @@
                     let accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
                     let rawAccel = Math.abs(accelMetersPerSec2);
                     
-                    // 1. 突变噪点舍弃逻辑（偏差过大则舍弃，图形上表现为扁平化）
+                    // 1. 突变噪点舍弃逻辑（偏差过大则舍弃）
                     let avgAccel = recentAccels.length > 0 ? recentAccels.reduce((a, b) => a + b, 0) / recentAccels.length : 0;
                     if (recentAccels.length >= MAX_HISTORY && Math.abs(rawAccel - avgAccel) > ERROR_THRESHOLD) {
                         rawAccel = avgAccel; 
@@ -278,9 +273,9 @@
                         if (recentAccels.length > MAX_HISTORY) recentAccels.shift();
                     }
 
-                    // 2. 熔断归零逻辑（＞100m/s²则强制归零，图形上表现为瞬间砸到底部）
+                    // 2. 熔断归零逻辑（＞100m/s²则强制归零）
                     if (rawAccel > 100.0) { rawAccel = 0.0; }
-                    if (rawAccel < 0.2) rawAccel = 0; // 手抖死区
+                    if (rawAccel < 0.2) rawAccel = 0; 
 
                     // 物理参数平滑
                     currentRealSpeed = velocityMetersPerSec * 0.25 + currentRealSpeed * 0.75;
