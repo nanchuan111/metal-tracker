@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>高精度追踪与实时加速度图表 v4.2 (20cm专属版)</title>
+    <title>高精度追踪与实时加速度图表 v4.5 (20cm高宽容版)</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
@@ -36,7 +36,7 @@
         <div id="controls" style="display:none;">
             <div class="slider-container">
                 <label>边缘检测门限:</label>
-                <input type="range" id="thresholdSlider" min="10" max="150" value="70">
+                <input type="range" id="thresholdSlider" min="10" max="180" value="70">
                 <span id="sliderVal">70</span>
             </div>
             
@@ -45,8 +45,8 @@
                 <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
             </div>
             <div class="data-row" style="margin-top: -5px;">
-                <span class="engine-tag">高级几何特征复合筛选已启用</span>
-                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">物理校准距离: 20cm专属</span>
+                <span class="engine-tag">专属几何约束已卸载 | 高宽容追踪模式开启</span>
+                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">物理校准: 20cm 距离</span>
             </div>
 
             <div id="chart-container">
@@ -67,7 +67,7 @@
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
 
-        // --- 【核心物理校准：20cm 距离配置】 ---
+        // --- 【物理校准：20cm 距离配置】 ---
         const PX_PER_METER = 3200; 
         
         let lastTime = performance.now();
@@ -81,18 +81,18 @@
         let currentRealAccel = 0;
         let lastDisplayTime = performance.now();
 
-        // --- 【异常数据舍弃与滤波队列】 ---
+        // --- 【全功能安全过滤队列参数】 ---
         let recentAccels = []; 
         const MAX_HISTORY = 5;  
-        const ERROR_THRESHOLD = 8.0; // 单帧突变大于 8.0 m/s² 即判定为噪点并舍弃
+        const ERROR_THRESHOLD = 7.0; // 单帧突变大于 7.0 m/s² 即判定为噪点并舍弃
 
-        // Chart.js 图像相关变量
+        // Chart.js 图像变量 (25点横轴流动)
         let chartInstance;
-        let chartLabels = Array(20).fill(''); 
-        let chartData = Array(20).fill(0);   
+        let chartLabels = Array(25).fill(''); 
+        let chartData = Array(25).fill(0);   
 
         // OpenCV 内存对象
-        let src, gray, blurred, edges, contours, hierarchy, approx;
+        let src, gray, blurred, edges, contours, hierarchy;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
@@ -110,11 +110,11 @@
                         label: '实时加速度 (m/s²)',
                         data: chartData,
                         borderColor: '#00ffff',
-                        borderWidth: 2,
+                        borderWidth: 2.5,
                         pointRadius: 0, 
                         fill: true,
-                        backgroundColor: 'rgba(0, 255, 255, 0.1)',
-                        tension: 0.3 
+                        backgroundColor: 'rgba(0, 255, 255, 0.06)',
+                        tension: 0.25 
                     }]
                 },
                 options: {
@@ -123,8 +123,8 @@
                     scales: {
                         y: {
                             min: 0,
-                            max: 15, 
-                            grid: { color: '#444' },
+                            max: 16, 
+                            grid: { color: '#333' },
                             ticks: { color: '#aaa' }
                         },
                         x: { display: false }
@@ -159,7 +159,6 @@
                     edges = new cv.Mat();
                     contours = new cv.MatVector();
                     hierarchy = new cv.Mat();
-                    approx = new cv.Mat();
                     isTracking = true;
                     requestAnimationFrame(trackLoop);
                 };
@@ -184,35 +183,18 @@
             let bestCenter = null;
             let maxArea = 0;
 
-            // --- 【形体几何复合筛选逻辑】 ---
+            // --- 【纯净高宽容度追踪核心：仅卡自适应面积区间，删除一切形体限制】 ---
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
                 
-                // 1. 适配 20cm 距离下的正方形真实像素面积区间
-                if (area > 150 && area < 6000) {
-                    
-                    // 2. 几何形体约束：计算轮廓周长并进行多边形逼近
-                    let perimeter = cv.arcLength(cnt, true);
-                    cv.approxPolyDP(cnt, approx, 0.04 * perimeter, true);
-                    
-                    // 必须满足：逼近后具有 4 个顶点（四边形）且为凸多边形
-                    if (approx.rows === 4 && cv.isContourConvex(approx)) {
-                        
-                        // 3. 饱满度(Solidity)约束：计算外接矩形
-                        let rect = cv.boundingRect(cnt);
-                        let rectArea = rect.width * rect.height;
-                        let solidity = area / rectArea;
-                        
-                        // 过滤非正方形噪点
-                        if (solidity > 0.80) {
-                            if (area > maxArea) {
-                                maxArea = area;
-                                let M = cv.moments(cnt, false);
-                                if (M.m00 !== 0) {
-                                    bestCenter = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
-                                }
-                            }
+                // 宽容过滤：只要像素面积处于 20cm 的合理范围内，直接捕捉最大面积者
+                if (area > 100 && area < 6500) {
+                    if (area > maxArea) {
+                        maxArea = area;
+                        let M = cv.moments(cnt, false);
+                        if (M.m00 !== 0) {
+                            bestCenter = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
                         }
                     }
                 }
@@ -221,9 +203,9 @@
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
-            // 高保真数据解算
+            // 数据运算与核心安全机制
             if (bestCenter && dt > 0) {
-                // 绘制青色高级追踪瞄准星
+                // 绘制极简、不遮挡视线的高亮青色瞄准星
                 ctx.beginPath();
                 ctx.arc(bestCenter.x, bestCenter.y, 20, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#00ffff';
@@ -240,7 +222,7 @@
                     let accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
                     let rawAccel = Math.abs(accelMetersPerSec2);
 
-                    // 核心逻辑①：单帧突变噪点舍弃
+                    // 核心功能①：单帧突变噪点舍弃逻辑
                     let avgAccel = recentAccels.length > 0 ? recentAccels.reduce((a, b) => a + b, 0) / recentAccels.length : 0;
                     if (recentAccels.length >= MAX_HISTORY && Math.abs(rawAccel - avgAccel) > ERROR_THRESHOLD) {
                         rawAccel = avgAccel; 
@@ -249,14 +231,14 @@
                         if (recentAccels.length > MAX_HISTORY) recentAccels.shift();
                     }
 
-                    // 核心逻辑②：上限熔断归零机制 (＞100.0 m/s² 视为跳变噪点，强行切断归零)
+                    // 核心功能②：上限强行熔断归零机制 (超过 100 m/s² 强制归零)
                     if (rawAccel > 100.0) {
                         rawAccel = 0.0;
                     }
 
                     if (rawAccel < 0.2) rawAccel = 0; // 手抖微噪过滤
 
-                    // 物理量一阶低通滤波平滑
+                    // 一阶低通滤波平滑更新
                     currentRealSpeed = velocityMetersPerSec * 0.25 + currentRealSpeed * 0.75;
                     currentRealAccel = rawAccel * 0.2 + currentRealAccel * 0.8;
 
@@ -270,7 +252,7 @@
                 lastPos = null;
             }
 
-            // 核心逻辑③：每 0.3 秒更新一次 UI 文字与图表数据
+            // 核心功能③：每 0.3 秒更新一次 UI 文字与生成 25 点折线图数据
             if (currentTime - lastDisplayTime >= 300) { 
                 speedVal.innerText = currentRealSpeed.toFixed(2);
                 accelVal.innerText = currentRealAccel.toFixed(2);
