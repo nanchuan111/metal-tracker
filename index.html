@@ -3,20 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>金属块实时追踪与加速度计 (m/s²)</title>
+    <title>金属立方体高精度追踪与加速度计</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
-        #container { position: relative; width: 100vw; height: 60vh; max-width: 640px; margin: 0 auto; background: #000; }
+        #container { position: relative; width: 100vw; height: 55vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 40vh; padding: 15px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; }
-        .data-box { font-size: 32px; font-weight: bold; color: #00ffff; margin: 10px 0; }
-        .sub-data { font-size: 18px; color: #aaa; margin-bottom: 15px; }
-        button { padding: 15px 30px; font-size: 18px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,255,255,0.3); }
-        .slider-container { margin: 10px auto; width: 80%; display: flex; justify-content: space-between; align-items: center; }
-        input[type=range] { width: 65%; }
+        #dashboard { height: 45vh; padding: 15px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; }
+        .data-box { font-size: 32px; font-weight: bold; color: #00ffff; margin: 8px 0; }
+        .sub-data { font-size: 16px; color: #aaa; margin-bottom: 10px; }
+        button { padding: 12px 25px; font-size: 18px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; }
+        .slider-container { margin: 8px auto; width: 85%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+        input[type=range] { width: 60%; }
+        #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
     </style>
+    <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
+
+    <div id="loading">正在加载OpenCV.js视觉引擎，请稍候...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -24,12 +28,12 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn">开始追踪金属块</button>
+        <button id="startBtn" style="display:none;">开始高精度追踪</button>
         <div id="controls" style="display:none;">
             <div class="slider-container">
-                <label>金属亮度门限:</label>
-                <input type="range" id="thresholdSlider" min="50" max="230" value="180">
-                <span id="sliderVal">180</span>
+                <label>边缘检测门限:</label>
+                <input type="range" id="thresholdSlider" min="10" max="150" value="70">
+                <span id="sliderVal">70</span>
             </div>
             <div class="data-box">实时加速度: <span id="accel-val">0.00</span> m/s²</div>
             <div class="sub-data">当前速度: <span id="speed-val">0.00</span> m/s</div>
@@ -46,25 +50,35 @@
         const thresholdSlider = document.getElementById('thresholdSlider');
         const sliderVal = document.getElementById('sliderVal');
         const controls = document.getElementById('controls');
+        const loadingText = document.getElementById('loading');
 
         // --- 【核心物理参数配置】 ---
-        // 手机距离物体 20cm 时画面放大：1厘米约为 32 像素，故 1米 = 3200 像素
+        // 假设手机距离物体 20cm，且立方体边长约为 1cm (0.01米)
+        // 1米在此场景下约为 3200 像素
         const PX_PER_METER = 3200; 
         
         let lastTime = performance.now();
         let lastPos = null;
         let lastVelocity = 0;
         let isTracking = false;
-        let targetThreshold = 180; // 默认调高初始门限，更适合抓取金属反光
+        let cannyThreshold = 70; // 默认边缘门限，针对黑色背景优化
 
         // 0.5秒定时显示缓存
         let currentRealSpeed = 0;
         let currentRealAccel = 0;
         let lastDisplayTime = performance.now();
 
+        // OpenCV 内存变量容器
+        let src, gray, blurred, edges, contours, hierarchy;
+
+        function onOpenCvReady() {
+            loadingText.style.display = 'none';
+            startBtn.style.display = 'inline-block';
+        }
+
         thresholdSlider.addEventListener('input', (e) => {
-            targetThreshold = parseInt(e.target.value);
-            sliderVal.innerText = targetThreshold;
+            cannyThreshold = parseInt(e.target.value);
+            sliderVal.innerText = cannyThreshold;
         });
 
         startBtn.addEventListener('click', async () => {
@@ -76,11 +90,20 @@
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 controls.style.display = 'block';
-                isTracking = true;
                 
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
+                    
+                    // 初始化 OpenCV 矩阵容器
+                    src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
+                    gray = new cv.Mat();
+                    blurred = new cv.Mat();
+                    edges = new cv.Mat();
+                    contours = new cv.MatVector();
+                    hierarchy = new cv.Mat();
+                    
+                    isTracking = true;
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
@@ -91,78 +114,83 @@
         function trackLoop() {
             if (!isTracking) return;
 
+            // 1. 抓取当前视频帧
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = frame.data;
+            let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            src.data.set(imageData.data);
 
-            let sumX = 0, sumY = 0, count = 0;
+            // 2. OpenCV 图像高级管道处理 (消除反光干扰)
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);                       // 灰度化
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT); // 高斯模糊去噪
+            cv.Canny(blurred, edges, cannyThreshold, cannyThreshold * 2);     //提取金属轮廓边缘
+            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE); //提取独立轮廓
 
-            for (let i = 0; i < data.length; i += 4) {
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-                const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            let bestCenter = null;
+            let maxArea = 0;
 
-                // 筛选超过门限的高亮金属区域
-                if (gray > targetThreshold) {
-                    const pixelIndex = i / 4;
-                    sumX += pixelIndex % canvas.width;
-                    sumY += Math.floor(pixelIndex / canvas.width);
-                    count++;
+            // 3. 寻找画面中大小最像立方体的轮廓
+            for (let i = 0; i < contours.size(); ++i) {
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt);
+                
+                // 限制轮廓大小，过滤过大(背景)或过小(噪点)的区域 (在20cm距离下，立方体轮廓面积通常在 150~5000 像素之间)
+                if (area > 150 && area < 6000) {
+                    if (area > maxArea) {
+                        maxArea = area;
+                        // 通过一阶矩计算质心
+                        let M = cv.moments(cnt, false);
+                        if (M.m00 !== 0) {
+                            bestCenter = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
+                        }
+                    }
                 }
             }
 
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000; // 秒
 
-            // 过滤噪点：确保识别区域大小合理
-            if (count > 50 && count < (data.length / 4) * 0.3 && dt > 0) { 
-                const currentPos = { x: sumX / count, y: sumY / count };
-
-                // 绘制高亮追踪十字靶心
+            // 4. 高精度物理运动学计算 (质心追踪)
+            if (bestCenter && dt > 0) {
+                // 在前端画布上画一个亮青色的高科技准星 (双环+十字)
                 ctx.beginPath();
-                ctx.arc(currentPos.x, currentPos.y, 15, 0, 2 * Math.PI);
+                ctx.arc(bestCenter.x, bestCenter.y, 18, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#00ffff';
                 ctx.lineWidth = 3;
                 ctx.stroke();
                 
+                ctx.fillStyle = '#00ffff';
                 ctx.beginPath();
-                ctx.moveTo(currentPos.x - 20, currentPos.y); ctx.lineTo(currentPos.x + 20, currentPos.y);
-                ctx.moveTo(currentPos.x, currentPos.y - 20); ctx.lineTo(currentPos.x, currentPos.y + 20);
-                ctx.strokeStyle = '#00ffff';
-                ctx.lineWidth = 1;
-                ctx.stroke();
+                ctx.arc(bestCenter.x, bestCenter.y, 4, 0, 2 * Math.PI);
+                ctx.fill();
 
                 if (lastPos) {
-                    const dx = currentPos.x - lastPos.x;
-                    const dy = currentPos.y - lastPos.y;
+                    const dx = bestCenter.x - lastPos.x;
+                    const dy = bestCenter.y - lastPos.y;
                     const distancePx = Math.sqrt(dx * dx + dy * dy);
 
-                    // 1. 像素到位移转换（公制单位）
                     const distanceMeters = distancePx / PX_PER_METER;
-
-                    // 2. 物理公式计算速度与加速度
                     const velocityMetersPerSec = distanceMeters / dt;
                     const accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
 
-                    // 3. 一阶低通滤波：抗抖动平滑处理
+                    // 5. 极其严格的一阶低通滤波：专治手抖
                     currentRealSpeed = velocityMetersPerSec * 0.25 + currentRealSpeed * 0.75;
                     
                     let rawAccel = Math.abs(accelMetersPerSec2);
-                    if (rawAccel < 0.15) rawAccel = 0; // 过滤手持微小抖动的死区
+                    // 设立 0.15 m/s² 的抖动死区
+                    if (rawAccel < 0.15) rawAccel = 0; 
                     currentRealAccel = rawAccel * 0.15 + currentRealAccel * 0.85;
 
                     lastVelocity = velocityMetersPerSec;
                 }
-                lastPos = currentPos;
+                lastPos = bestCenter;
             } else {
-                // 失去目标时速度自然衰减
-                currentRealSpeed *= 0.4;
+                currentRealSpeed *= 0.5;
                 if(currentRealSpeed < 0.02) currentRealSpeed = 0;
                 lastVelocity = 0;
+                lastPos = null;
             }
 
-            // --- 【核心：每隔 0.5 秒 (500毫秒) 刷新一次前端 UI】 ---
+            // 6. 每 0.5 秒平滑刷新一次显示 UI
             if (currentTime - lastDisplayTime >= 500) { 
                 speedVal.innerText = currentRealSpeed.toFixed(2);
                 accelVal.innerText = currentRealAccel.toFixed(2);
