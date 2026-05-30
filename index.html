@@ -243,3 +243,51 @@
                     // 核心逻辑①：单帧突变噪点舍弃
                     let avgAccel = recentAccels.length > 0 ? recentAccels.reduce((a, b) => a + b, 0) / recentAccels.length : 0;
                     if (recentAccels.length >= MAX_HISTORY && Math.abs(rawAccel - avgAccel) > ERROR_THRESHOLD) {
+                        rawAccel = avgAccel; 
+                    } else {
+                        recentAccels.push(rawAccel);
+                        if (recentAccels.length > MAX_HISTORY) recentAccels.shift();
+                    }
+
+                    // 核心逻辑②：上限熔断归零机制 (＞100.0 m/s² 视为跳变噪点，强行切断归零)
+                    if (rawAccel > 100.0) {
+                        rawAccel = 0.0;
+                    }
+
+                    if (rawAccel < 0.2) rawAccel = 0; // 手抖微噪过滤
+
+                    // 物理量一阶低通滤波平滑
+                    currentRealSpeed = velocityMetersPerSec * 0.25 + currentRealSpeed * 0.75;
+                    currentRealAccel = rawAccel * 0.2 + currentRealAccel * 0.8;
+
+                    lastVelocity = velocityMetersPerSec;
+                }
+                lastPos = bestCenter;
+            } else {
+                currentRealSpeed *= 0.5;
+                if(currentRealSpeed < 0.02) currentRealSpeed = 0;
+                lastVelocity = 0;
+                lastPos = null;
+            }
+
+            // 核心逻辑③：每 0.3 秒更新一次 UI 文字与图表数据
+            if (currentTime - lastDisplayTime >= 300) { 
+                speedVal.innerText = currentRealSpeed.toFixed(2);
+                accelVal.innerText = currentRealAccel.toFixed(2);
+
+                chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
+                chartData.shift(); 
+                
+                if (chartInstance) {
+                    chartInstance.update('none'); 
+                }
+
+                lastDisplayTime = currentTime;
+            }
+
+            lastTime = currentTime;
+            requestAnimationFrame(trackLoop);
+        }
+    </script>
+</body>
+</html>
