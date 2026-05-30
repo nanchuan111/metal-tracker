@@ -62,4 +62,235 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const accelVal = document.getElementById('accel-val');
-        const
+        const speedVal = document.getElementById('speed-val');
+        const startBtn = document.getElementById('startBtn');
+        const thresholdSlider = document.getElementById('thresholdSlider');
+        const sliderVal = document.getElementById('sliderVal');
+        const controls = document.getElementById('controls');
+        const loadingText = document.getElementById('loading');
+
+        // --- 【核心物理参数配置】 ---
+        // 距离缩短为 10cm（原先20cm放大一倍）：1厘米约为 64 像素，故 1米 = 6400 像素
+        const PX_PER_METER = 6400; 
+        
+        let lastTime = performance.now();
+        let lastPos = null;
+        let lastVelocity = 0;
+        let isTracking = false;
+        let cannyThreshold = 210;
+
+        // 0.3秒定时显示与图表缓存
+        let currentRealSpeed = 0;
+        let currentRealAccel = 0;
+        let lastDisplayTime = performance.now();
+
+        // --- 【异常数据过滤参数】 ---
+        let recentAccels = []; 
+        const MAX_HISTORY = 5;  
+        const ERROR_THRESHOLD = 12.0; // 如果单帧计算出的加速度与附近平均值突变超过 12 m/s²，判定为反光闪烁，予以舍弃
+
+        // Chart.js 图表实例变量
+        let chartInstance;
+        let chartLabels = Array(20).fill(''); // 保持20个数据点宽度
+        let chartData = Array(20).fill(0);   
+
+        // OpenCV 内存变量
+        let src, gray, blurred, edges, contours, hierarchy, approx;
+
+        function onOpenCvReady() {
+            loadingText.style.display = 'none';
+            startBtn.style.display = 'inline-block';
+        }
+
+        // 初始化加速度折线图
+        function initChart() {
+            const chartCtx = document.getElementById('accelChart').getContext('2d');
+            chartInstance = new Chart(chartCtx, {
+                type: 'line',
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: '实时加速度 (m/s²)',
+                        data: chartData,
+                        borderColor: '#00ffff',
+                        borderWidth: 2,
+                        pointRadius: 0, 
+                        fill: true,
+                        backgroundColor: 'rgba(0, 255, 255, 0.08)',
+                        tension: 0.3 
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 100, // 配合100的上限，量程上限设为100
+                            grid: { color: '#333' },
+                            ticks: { color: '#aaa' }
+                        },
+                        x: { display: false }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        thresholdSlider.addEventListener('input', (e) => {
+            cannyThreshold = parseInt(e.target.value);
+            sliderVal.innerText = cannyThreshold;
+        });
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+                startBtn.style.display = 'none';
+                controls.style.display = 'block';
+                
+                initChart();
+
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    
+                    src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
+                    gray = new cv.Mat();
+                    blurred = new cv.Mat();
+                    edges = new cv.Mat();
+                    contours = new cv.MatVector();
+                    hierarchy = new cv.Mat();
+                    approx = new cv.Mat();
+                    
+                    isTracking = true;
+                    requestAnimationFrame(trackLoop);
+                };
+            } catch (err) {
+                alert("无法获取相机权限: " + err.message);
+            }
+        });
+
+        function trackLoop() {
+            if (!isTracking) return;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            src.data.set(imageData.data);
+
+            // OpenCV 核心处理：灰度 -> 高斯模糊 -> 边缘检测 -> 轮廓寻找
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0, 0, cv.BORDER_DEFAULT);
+            cv.Canny(blurred, edges, cannyThreshold, cannyThreshold * 1.5);
+            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+            let bestCenter = null;
+            let maxArea = 0;
+
+            // 专属模式：仅追踪正方形金属块
+            for (let i = 0; i < contours.size(); ++i) {
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt);
+                
+                // 10cm近距离下，正方形的面积范围约束调整（1000 ~ 25000像素）
+                if (area > 1000 && area < 25000) {
+                    let perimeter = cv.arcLength(cnt, true);
+                    cv.approxPolyDP(cnt, approx, 0.04 * perimeter, true);
+                    
+                    // 必须具备4个角（四边形）且为凸轮廓
+                    if (approx.rows === 4 && cv.isContourConvex(approx)) {
+                        let rect = cv.boundingRect(cnt);
+                        let rectArea = rect.width * rect.height;
+                        let solidity = area / rectArea;
+                        
+                        // 饱满度过滤，排除条状或长矩形金属反光线，只认高方正度方块
+                        if (solidity > 0.82) {
+                            if (area > maxArea) {
+                                maxArea = area;
+                                let M = cv.moments(cnt, false);
+                                if (M.m00 !== 0) {
+                                    bestCenter = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            const currentTime = performance.now();
+            const dt = (currentTime - lastTime) / 1000;
+
+            if (bestCenter && dt > 0) {
+                // 在手机屏幕上画一个亮青色的瞄准标
+                ctx.beginPath();
+                ctx.arc(bestCenter.x, bestCenter.y, 24, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                if (lastPos) {
+                    const dx = bestCenter.x - lastPos.x;
+                    const dy = bestCenter.y - lastPos.y;
+                    const distancePx = Math.sqrt(dx * dx + dy * dy);
+
+                    const distanceMeters = distancePx / PX_PER_METER;
+                    const velocityMetersPerSec = distanceMeters / dt;
+                    let accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
+                    let rawAccel = Math.abs(accelMetersPerSec2);
+
+                    // --- 【核心修改①：舍弃与原本加速度偏差过大的数值】 ---
+                    let avgAccel = recentAccels.length > 0 ? recentAccels.reduce((a, b) => a + b, 0) / recentAccels.length : 0;
+                    
+                    if (recentAccels.length >= MAX_HISTORY && Math.abs(rawAccel - avgAccel) > ERROR_THRESHOLD) {
+                        rawAccel = avgAccel; // 属于像素闪烁产生的假突变，丢弃，沿用均值
+                    } else {
+                        recentAccels.push(rawAccel);
+                        if (recentAccels.length > MAX_HISTORY) recentAccels.shift();
+                    }
+
+                    // --- 【核心修改②：上限不超过100m/s²，否则显示0】 ---
+                    if (rawAccel > 100.0) {
+                        rawAccel = 0.0;
+                    }
+
+                    if (rawAccel < 0.2) rawAccel = 0; // 微小手抖死区过滤
+
+                    // 物理量平滑更新
+                    currentRealSpeed = velocityMetersPerSec * 0.25 + currentRealSpeed * 0.75;
+                    currentRealAccel = rawAccel * 0.2 + currentRealAccel * 0.8;
+
+                    lastVelocity = velocityMetersPerSec;
+                }
+                lastPos = bestCenter;
+            } else {
+                currentRealSpeed *= 0.5;
+                if(currentRealSpeed < 0.02) currentRealSpeed = 0;
+                lastVelocity = 0;
+                lastPos = null;
+            }
+
+            // --- 【核心修改③：每隔 0.3 秒更新一次文字与动态图像】 ---
+            if (currentTime - lastDisplayTime >= 300) { 
+                speedVal.innerText = currentRealSpeed.toFixed(2);
+                accelVal.innerText = currentRealAccel.toFixed(2);
+
+                // 更新折线图数据
+                chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
+                chartData.shift(); 
+                
+                if (chartInstance) {
+                    chartInstance.update('none'); // 高效刷新图像
+                }
+
+                lastDisplayTime = currentTime;
+            }
+
+            lastTime = currentTime;
+            requestAnimationFrame(trackLoop);
+        }
+    </script>
+</body>
+</html>
