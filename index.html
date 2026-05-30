@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>高精度追踪与实时加速度图表 v5.0 (0.1秒高频结算版)</title>
+    <title>高精度追踪与实时加速度图表 v5.2 (裸数据直出版)</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
@@ -17,7 +17,7 @@
         input[type=range] { width: 60%; }
         #chart-container { width: 95%; max-width: 600px; height: 180px; margin: 10px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-        .engine-tag { font-size: 12px; color: #ff0055; background: rgba(255,0,85,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
+        .engine-tag { font-size: 12px; color: #ffcc00; background: rgba(255,204,0,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -45,8 +45,8 @@
                 <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
             </div>
             <div class="data-row" style="margin-top: -5px;">
-                <span class="engine-tag">0.1秒超高频物理结算引擎已启用</span>
-                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">距离: 20cm | 无形体约束</span>
+                <span class="engine-tag">⚠️ 突变过滤已完全关闭 | 原始波形直出</span>
+                <span class="sub-data" style="color: #00ffff; font-weight: bold;">0.1秒高频结算</span>
             </div>
 
             <div id="chart-container">
@@ -73,19 +73,14 @@
         let isTracking = false;
         let cannyThreshold = 70; 
 
-        // 0.1秒追踪时间控制中心
+        // 时间与结算控制
         let lastCalcTime = performance.now();
         let lastPos = null;
         let lastVelocity = 0;
         let currentRealSpeed = 0;
         let currentRealAccel = 0;
 
-        // --- 【全功能安全过滤队列参数】 ---
-        let recentAccels = []; 
-        const MAX_HISTORY = 5;  
-        const ERROR_THRESHOLD = 8.0; // 0.1秒高频下，单帧突变大于 8.0 m/s² 判定为噪点并舍弃
-
-        // Chart.js 图像变量 (扩展至 30 个点展示高频数据，视野更广)
+        // Chart.js 图像变量 (保持30点高频流动)
         let chartInstance;
         let chartLabels = Array(30).fill(''); 
         let chartData = Array(30).fill(0);   
@@ -98,7 +93,7 @@
             startBtn.style.display = 'inline-block';
         }
 
-        // 初始化动态折线图生成器
+        // 初始化图表
         function initChart() {
             const chartCtx = document.getElementById('accelChart').getContext('2d');
             chartInstance = new Chart(chartCtx, {
@@ -106,14 +101,14 @@
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: '实时加速度 (m/s²)',
+                        label: '实时原始加速度 (m/s²)',
                         data: chartData,
-                        borderColor: '#00ffff',
+                        borderColor: '#ffaa00', // 更改为橙色，提示当前为无过滤的裸数据
                         borderWidth: 2,
-                        pointRadius: 0, 
+                        pointRadius: 2, // 开启数据点圆圈，方便观察每一个突变点
                         fill: true,
-                        backgroundColor: 'rgba(0, 255, 255, 0.05)',
-                        tension: 0.2 // 高频数据降低平滑张力，确保图像生成的真实感
+                        backgroundColor: 'rgba(255, 170, 0, 0.05)',
+                        tension: 0 // 关闭曲线张力，使用折线纯实反映跳变
                     }]
                 },
                 options: {
@@ -122,7 +117,7 @@
                     scales: {
                         y: {
                             min: 0,
-                            max: 15, 
+                            max: 25, // 裸数据波动较大，适度调高图表上限视野
                             grid: { color: '#333' },
                             ticks: { color: '#aaa' }
                         },
@@ -159,7 +154,6 @@
                     contours = new cv.MatVector();
                     hierarchy = new cv.Mat();
                     isTracking = true;
-                    // 初始化计算锚点时间
                     lastCalcTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
@@ -171,12 +165,10 @@
         function trackLoop() {
             if (!isTracking) return;
 
-            // 1. 始终保持 60 帧的画面绘制与准星渲染，防止肉眼可见的卡顿
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
-            // 2. OpenCV 图像处理
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
             cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
             cv.Canny(blurred, edges, cannyThreshold, cannyThreshold * 2);
@@ -185,7 +177,7 @@
             let bestCenter = null;
             let maxArea = 0;
 
-            // 3. 20cm 纯净高宽容度面积定位（无专属几何卡锁）
+            // 宽容面积核心过滤
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
@@ -200,11 +192,11 @@
                 }
             }
 
-            // 4. 实时绘制 60 帧同步的追踪十字准星
+            // 实时绘制十字追踪准星
             if (bestCenter) {
                 ctx.beginPath();
                 ctx.arc(bestCenter.x, bestCenter.y, 18, 0, 2 * Math.PI);
-                ctx.strokeStyle = '#00ffff';
+                ctx.strokeStyle = '#ffaa00';
                 ctx.lineWidth = 3;
                 ctx.stroke();
             }
@@ -212,7 +204,7 @@
             const currentTime = performance.now();
             const dt = (currentTime - lastCalcTime) / 1000;
 
-            // --- 【核心控制重构：严格锁死每 0.1 秒进行一次物理结算与图像生成】 ---
+            // --- 【严格锁死 0.1 秒无过滤计算】 ---
             if (dt >= 0.100) { 
                 if (bestCenter) {
                     if (lastPos) {
@@ -220,59 +212,39 @@
                         const dy = bestCenter.y - lastPos.y;
                         const distancePx = Math.sqrt(dx * dx + dy * dy);
 
-                        // 解算真实的物理速度
-                        const distanceMeters = distancePx / PX_PER_METER;
-                        const velocityMetersPerSec = distanceMeters / dt;
+                        // 1. 裸速度解算
+                        currentRealSpeed = distancePx / PX_PER_METER / dt;
                         
-                        // 解算真实的物理加速度
-                        let accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
-                        let rawAccel = Math.abs(accelMetersPerSec2);
+                        // 2. 裸加速度解算（完全移除突变判定和历史均值替代）
+                        let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
-                        // 核心逻辑①：0.1秒高频突变噪点舍弃
-                        let avgAccel = recentAccels.length > 0 ? recentAccels.reduce((a, b) => a + b, 0) / recentAccels.length : 0;
-                        if (recentAccels.length >= MAX_HISTORY && Math.abs(rawAccel - avgAccel) > ERROR_THRESHOLD) {
-                            rawAccel = avgAccel; // 属于反光跳跳变引发的干扰，沿用平稳均值
-                        } else {
-                            recentAccels.push(rawAccel);
-                            if (recentAccels.length > MAX_HISTORY) recentAccels.shift();
-                        }
-
-                        // 核心逻辑②：上限熔断归零机制
+                        // 3. 底层强行熔断归零保护
                         if (rawAccel > 100.0) {
                             rawAccel = 0.0;
                         }
 
-                        if (rawAccel < 0.25) rawAccel = 0; // 手抖微燥死区过滤
-
-                        // 数据互补低通滤波
-                        currentRealSpeed = velocityMetersPerSec * 0.4 + currentRealSpeed * 0.6;
-                        currentRealAccel = rawAccel * 0.3 + currentRealAccel * 0.7;
-
-                        lastVelocity = velocityMetersPerSec;
+                        currentRealAccel = rawAccel; 
+                        lastVelocity = currentRealSpeed;
                     }
                     lastPos = { x: bestCenter.x, y: bestCenter.y };
                 } else {
-                    // 目标丢失衰减
-                    currentRealSpeed *= 0.3;
-                    if(currentRealSpeed < 0.02) currentRealSpeed = 0;
-                    currentRealAccel *= 0.3;
-                    if(currentRealAccel < 0.02) currentRealAccel = 0;
+                    currentRealSpeed = 0;
+                    currentRealAccel = 0;
                     lastVelocity = 0;
                     lastPos = null;
                 }
 
-                // 核心逻辑③：数据实时输出至 UI 文本
+                // 4. 数据毫无保留直出 UI 
                 speedVal.innerText = currentRealSpeed.toFixed(2);
                 accelVal.innerText = currentRealAccel.toFixed(2);
 
-                // 核心逻辑④：源源不断地向折线图推入数据并刷新图像
+                // 5. 数据直出折线图（关闭张力平滑，展示最真实的物理锯齿）
                 chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
                 chartData.shift(); 
                 if (chartInstance) {
-                    chartInstance.update('none'); // 高频无动画刷新
+                    chartInstance.update('none'); 
                 }
 
-                // 重置时间计数器
                 lastCalcTime = currentTime;
             }
 
