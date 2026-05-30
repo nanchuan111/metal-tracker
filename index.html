@@ -3,55 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>保温箱内部：方块金属高精度追踪</title>
+    <title>高精度追踪与实时加速度图表 v5.0 (0.1秒高频结算版)</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
-        #container { position: relative; width: 100vw; height: 50vh; max-width: 640px; margin: 0 auto; background: #000; }
+        #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 50vh; padding: 15px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; }
-        .data-box { font-size: 32px; font-weight: bold; color: #00ffff; margin: 8px 0; }
-        .sub-data { font-size: 16px; color: #aaa; margin-bottom: 10px; }
-        button { padding: 12px 25px; font-size: 18px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; }
-        .slider-container { margin: 8px auto; width: 85%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; overflow-y: auto; }
+        .data-row { display: flex; justify-content: space-around; margin: 5px 0; align-items: center; }
+        .data-box { font-size: 24px; font-weight: bold; color: #00ffff; }
+        .sub-data { font-size: 16px; color: #aaa; }
+        button { padding: 10px 20px; font-size: 16px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
+        .slider-container { margin: 5px auto; width: 90%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
         input[type=range] { width: 60%; }
+        #chart-container { width: 95%; max-width: 600px; height: 180px; margin: 10px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
+        .engine-tag { font-size: 12px; color: #ff0055; background: rgba(255,0,85,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <div id="loading">正在加载OpenCV.js视觉引擎，请稍候...针对你在保温箱内部追踪单一金属方块的需求，我为你生成了升级版代码。
-
-这个版本特别引入了**高模糊预处理（Gaussian Blur）**和**动态 Canny 边缘检测（Dynamic Canny）**。这些算法能够完美中和保温箱内壁（光滑、浅蓝色）的强反光和螺丝的噪点，确保准星只死死咬住那个金属方块，哪怕它在反光最强烈的位置运动。
-
-### 🛠️ 针对保温箱场景优化的终极稳定版代码
-
-请将以下代码全选并替换（覆盖）你 GitHub 上原本的 `index.html` 内容：
-
-```html
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>保温箱内部：方块金属高精度追踪</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
-        #container { position: relative; width: 100vw; height: 50vh; max-width: 640px; margin: 0 auto; background: #000; }
-        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 50vh; padding: 15px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; }
-        .data-box { font-size: 32px; font-weight: bold; color: #00ffff; margin: 8px 0; }
-        .sub-data { font-size: 16px; color: #aaa; margin-bottom: 10px; }
-        button { padding: 12px 25px; font-size: 18px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; }
-        .slider-container { margin: 8px auto; width: 85%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
-        input[type=range] { width: 60%; }
-        #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-    </style>
-    <script async src="[https://docs.opencv.org/4.x/opencv.js](https://docs.opencv.org/4.x/opencv.js)" onload="onOpenCvReady();" type="text/javascript"></script>
-</head>
-<body>
-
-    <div id="loading">正在加载OpenCV.js视觉引擎，请稍候...</div>
+    <div id="loading">正在加载 OpenCV.js 视觉引擎，请稍候...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -63,11 +36,22 @@
         <div id="controls" style="display:none;">
             <div class="slider-container">
                 <label>边缘检测门限:</label>
-                <input type="range" id="thresholdSlider" min="20" max="250" value="70">
+                <input type="range" id="thresholdSlider" min="10" max="180" value="70">
                 <span id="sliderVal">70</span>
             </div>
-            <div class="data-box">实时加速度: <span id="accel-val">0.00</span> m/s²</div>
-            <div class="sub-data">当前速度: <span id="speed-val">0.00</span> m/s</div>
+            
+            <div class="data-row">
+                <div class="data-box">加速度: <span id="accel-val">0.00</span> m/s²</div>
+                <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
+            </div>
+            <div class="data-row" style="margin-top: -5px;">
+                <span class="engine-tag">0.1秒超高频物理结算引擎已启用</span>
+                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">距离: 20cm | 无形体约束</span>
+            </div>
+
+            <div id="chart-container">
+                <canvas id="accelChart"></canvas>
+            </div>
         </div>
     </div>
 
@@ -83,28 +67,70 @@
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
 
-        // --- 【核心物理参数配置】 ---
-        // 假设手机距离物体 20cm，且立方体边长约为 1cm (0.01米)
-        // 在此场景下，1米转化为 3200 像素进行计算
+        // --- 【核心物理校准：20cm 距离配置】 ---
         const PX_PER_METER = 3200; 
         
-        let lastTime = performance.now();
+        let isTracking = false;
+        let cannyThreshold = 70; 
+
+        // 0.1秒追踪时间控制中心
+        let lastCalcTime = performance.now();
         let lastPos = null;
         let lastVelocity = 0;
-        let isTracking = false;
-        let cannyThreshold = 70; // 针对淡蓝色反光背景优化的初始门限
-
-        // 用于 0.5 秒定时刷新的变量
         let currentRealSpeed = 0;
         let currentRealAccel = 0;
-        let lastDisplayTime = performance.now();
 
-        // OpenCV 内存变量容器
+        // --- 【全功能安全过滤队列参数】 ---
+        let recentAccels = []; 
+        const MAX_HISTORY = 5;  
+        const ERROR_THRESHOLD = 8.0; // 0.1秒高频下，单帧突变大于 8.0 m/s² 判定为噪点并舍弃
+
+        // Chart.js 图像变量 (扩展至 30 个点展示高频数据，视野更广)
+        let chartInstance;
+        let chartLabels = Array(30).fill(''); 
+        let chartData = Array(30).fill(0);   
+
+        // OpenCV 内存对象
         let src, gray, blurred, edges, contours, hierarchy;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
             startBtn.style.display = 'inline-block';
+        }
+
+        // 初始化动态折线图生成器
+        function initChart() {
+            const chartCtx = document.getElementById('accelChart').getContext('2d');
+            chartInstance = new Chart(chartCtx, {
+                type: 'line',
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: '实时加速度 (m/s²)',
+                        data: chartData,
+                        borderColor: '#00ffff',
+                        borderWidth: 2,
+                        pointRadius: 0, 
+                        fill: true,
+                        backgroundColor: 'rgba(0, 255, 255, 0.05)',
+                        tension: 0.2 // 高频数据降低平滑张力，确保图像生成的真实感
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 15, 
+                            grid: { color: '#333' },
+                            ticks: { color: '#aaa' }
+                        },
+                        x: { display: false }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
         }
 
         thresholdSlider.addEventListener('input', (e) => {
@@ -121,20 +147,20 @@
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 controls.style.display = 'block';
-                
+                initChart(); 
+
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    
-                    // 初始化 OpenCV 矩阵容器
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
                     gray = new cv.Mat();
                     blurred = new cv.Mat();
                     edges = new cv.Mat();
                     contours = new cv.MatVector();
                     hierarchy = new cv.Mat();
-                    
                     isTracking = true;
+                    // 初始化计算锚点时间
+                    lastCalcTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
@@ -145,30 +171,27 @@
         function trackLoop() {
             if (!isTracking) return;
 
-            // 1. 抓取当前视频帧并绘制到画布
+            // 1. 始终保持 60 帧的画面绘制与准星渲染，防止肉眼可见的卡顿
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
-            // 2. OpenCV 高级图像管道处理 (针对保温箱强反光优化)
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);                       // 灰度化
-            cv.GaussianBlur(gray, blurred, new cv.Size(7, 7), 0, 0, cv.BORDER_DEFAULT); // 加强模糊去去反光噪
-            cv.Canny(blurred, edges, cannyThreshold, cannyThreshold * 1.5);     // 坎尼边缘提取，降低强反光误报
-            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE); //提取独立轮廓
+            // 2. OpenCV 图像处理
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            cv.Canny(blurred, edges, cannyThreshold, cannyThreshold * 2);
+            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let bestCenter = null;
             let maxArea = 0;
 
-            // 3. 寻找画面中大小最像金属方块的轮廓，自动忽略小噪点（如螺丝）
+            // 3. 20cm 纯净高宽容度面积定位（无专属几何卡锁）
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                
-                // 限制轮廓面积范围，过滤过大(背景)或过小(噪点)的区域 (针对20cm下的金属方块优化)
-                if (area > 300 && area < 8000) {
+                if (area > 100 && area < 6500) {
                     if (area > maxArea) {
                         maxArea = area;
-                        // 通过一阶矩计算质心
                         let M = cv.moments(cnt, false);
                         if (M.m00 !== 0) {
                             bestCenter = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
@@ -177,58 +200,82 @@
                 }
             }
 
-            const currentTime = performance.now();
-            const dt = (currentTime - lastTime) / 1000;
-
-            // 4. 高精度物理运动学计算 (质心追踪)
-            if (bestCenter && dt > 0) {
-                // 在前端画布上画一个亮青色的高科技瞄准靶 (双环十字)
+            // 4. 实时绘制 60 帧同步的追踪十字准星
+            if (bestCenter) {
                 ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 20, 0, 2 * Math.PI);
+                ctx.arc(bestCenter.x, bestCenter.y, 18, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#00ffff';
                 ctx.lineWidth = 3;
                 ctx.stroke();
-                
-                ctx.fillStyle = '#00ffff';
-                ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 5, 0, 2 * Math.PI);
-                ctx.fill();
-
-                if (lastPos) {
-                    const dx = bestCenter.x - lastPos.x;
-                    const dy = bestCenter.y - lastPos.y;
-                    const distancePx = Math.sqrt(dx * dx + dy * dy);
-
-                    const distanceMeters = distancePx / PX_PER_METER;
-                    const velocityMetersPerSec = distanceMeters / dt;
-                    const accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
-
-                    // 一阶低通滤波：抗手抖平滑处理
-                    currentRealSpeed = velocityMetersPerSec * 0.25 + currentRealSpeed * 0.75;
-                    
-                    let rawAccel = Math.abs(accelMetersPerSec2);
-                    // 设立 0.15 m/s² 的抖动死区
-                    if (rawAccel < 0.15) rawAccel = 0; 
-                    currentRealAccel = rawAccel * 0.15 + currentRealAccel * 0.85;
-
-                    lastVelocity = velocityMetersPerSec;
-                }
-                lastPos = bestCenter;
-            } else {
-                currentRealSpeed *= 0.5;
-                if(currentRealSpeed < 0.02) currentRealSpeed = 0;
-                lastVelocity = 0;
-                lastPos = null;
             }
 
-            // 5. 每 0.5 秒平滑刷新一次显示 UI
-            if (currentTime - lastDisplayTime >= 500) { 
+            const currentTime = performance.now();
+            const dt = (currentTime - lastCalcTime) / 1000;
+
+            // --- 【核心控制重构：严格锁死每 0.1 秒进行一次物理结算与图像生成】 ---
+            if (dt >= 0.100) { 
+                if (bestCenter) {
+                    if (lastPos) {
+                        const dx = bestCenter.x - lastPos.x;
+                        const dy = bestCenter.y - lastPos.y;
+                        const distancePx = Math.sqrt(dx * dx + dy * dy);
+
+                        // 解算真实的物理速度
+                        const distanceMeters = distancePx / PX_PER_METER;
+                        const velocityMetersPerSec = distanceMeters / dt;
+                        
+                        // 解算真实的物理加速度
+                        let accelMetersPerSec2 = (velocityMetersPerSec - lastVelocity) / dt;
+                        let rawAccel = Math.abs(accelMetersPerSec2);
+
+                        // 核心逻辑①：0.1秒高频突变噪点舍弃
+                        let avgAccel = recentAccels.length > 0 ? recentAccels.reduce((a, b) => a + b, 0) / recentAccels.length : 0;
+                        if (recentAccels.length >= MAX_HISTORY && Math.abs(rawAccel - avgAccel) > ERROR_THRESHOLD) {
+                            rawAccel = avgAccel; // 属于反光跳跳变引发的干扰，沿用平稳均值
+                        } else {
+                            recentAccels.push(rawAccel);
+                            if (recentAccels.length > MAX_HISTORY) recentAccels.shift();
+                        }
+
+                        // 核心逻辑②：上限熔断归零机制
+                        if (rawAccel > 100.0) {
+                            rawAccel = 0.0;
+                        }
+
+                        if (rawAccel < 0.25) rawAccel = 0; // 手抖微燥死区过滤
+
+                        // 数据互补低通滤波
+                        currentRealSpeed = velocityMetersPerSec * 0.4 + currentRealSpeed * 0.6;
+                        currentRealAccel = rawAccel * 0.3 + currentRealAccel * 0.7;
+
+                        lastVelocity = velocityMetersPerSec;
+                    }
+                    lastPos = { x: bestCenter.x, y: bestCenter.y };
+                } else {
+                    // 目标丢失衰减
+                    currentRealSpeed *= 0.3;
+                    if(currentRealSpeed < 0.02) currentRealSpeed = 0;
+                    currentRealAccel *= 0.3;
+                    if(currentRealAccel < 0.02) currentRealAccel = 0;
+                    lastVelocity = 0;
+                    lastPos = null;
+                }
+
+                // 核心逻辑③：数据实时输出至 UI 文本
                 speedVal.innerText = currentRealSpeed.toFixed(2);
                 accelVal.innerText = currentRealAccel.toFixed(2);
-                lastDisplayTime = currentTime;
+
+                // 核心逻辑④：源源不断地向折线图推入数据并刷新图像
+                chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
+                chartData.shift(); 
+                if (chartInstance) {
+                    chartInstance.update('none'); // 高频无动画刷新
+                }
+
+                // 重置时间计数器
+                lastCalcTime = currentTime;
             }
 
-            lastTime = currentTime;
             requestAnimationFrame(trackLoop);
         }
     </script>
