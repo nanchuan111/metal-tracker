@@ -3,28 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title></title>
+    <title>物理实验专用：黄金时段自适应结算系统 v16.0</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; text-align: center; }
-        #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
+        #container { position: relative; width: 100vw; height: 35vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #1e1e1e; border-top: 3px solid #ff3366; overflow-y: auto; }
+        #dashboard { height: 65vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00f0ff; overflow-y: auto; }
+        
+        #record-console { background: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #444; }
+        .btn-group { display: flex; justify-content: center; gap: 10px; margin-top: 5px; }
+        .btn-action { padding: 10px 18px; font-size: 14px; font-weight: bold; border: none; border-radius: 20px; cursor: pointer; }
+        #startRecBtn { background: #00f0ff; color: #000; }
+        #stopRecBtn { background: #ffaa00; color: #000; }
+        #avg-display { font-size: 20px; color: #00f0ff; margin-top: 6px; font-weight: bold; background: #151515; padding: 6px; border-radius: 6px; }
+
         .data-row { display: flex; justify-content: space-around; margin: 5px 0; align-items: center; }
-        .data-box { font-size: 24px; font-weight: bold; color: #ff3366; }
+        .data-box { font-size: 24px; font-weight: bold; color: #00f0ff; }
         .sub-data { font-size: 16px; color: #aaa; }
-        button { padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; box-shadow: 0 4px 10px rgba(255,51,102,0.3); }
-        .slider-container { margin: 8px auto; width: 90%; display: flex; justify-content: space-between; align-items: center; font-size: 13px; background: #252525; padding: 6px 12px; border-radius: 8px; }
-        input[type=range] { width: 60%; }
-        #chart-container { width: 95%; max-width: 600px; height: 150px; margin: 10px auto; background: #151515; border-radius: 8px; padding: 5px; border: 1px solid #333; }
+        .grid-sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; background: #1e1e1e; border-radius: 8px; margin-bottom: 6px; }
+        .slider-container { display: flex; flex-direction: column; align-items: center; font-size: 12px; color: #ccc; }
+        input[type=range] { width: 85%; margin-top: 2px; }
+        #chart-container { width: 95%; max-width: 600px; height: 120px; margin: 5px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-        .engine-tag { font-size: 12px; color: #fff; background: #ff3366; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <div id="loading"></div>
+    <div id="loading">正在加载黄金时段自适应结算引擎...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -32,22 +39,46 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none;">启动高斯背景建模追踪</button>
+        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #00f0ff; color: #000; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">启动自适应物理实验系统</button>
         
         <div id="controls" style="display:none;">
-            <div class="slider-container">
-                <label>背景学习速率:</label>
-                <input type="range" id="learningRateSlider" min="0" max="100" value="0">
-                <span id="lrVal">0.000</span>
+            <div id="record-console">
+                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">🔬 黄金时段自动去噪加速计</div>
+                <div class="btn-group">
+                    <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
+                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 过滤异常并结算</button>
+                </div>
+                <div id="avg-display">真实滑行加速度 a: <span id="avg-val">--</span> m/s²</div>
+                <div id="status-hint" style="font-size:11px; color:#888; margin-top:4px;">等待实验开始...</div>
+            </div>
+
+            <div class="grid-sliders">
+                <div class="slider-container">
+                    <label>⬅ extinction 左边界: <span id="valLeft">60</span></label>
+                    <input type="range" id="roiLeft" min="0" max="300" value="60">
+                </div>
+                <div class="slider-container">
+                    <label>➡️ 右边界: <span id="valRight">580</span></label>
+                    <input type="range" id="roiRight" min="340" max="640" value="580">
+                </div>
+                <div class="slider-container">
+                    <label>⬆️ 上边界: <span id="valTop">40</span></label>
+                    <input type="range" id="roiTop" min="0" max="200" value="40">
+                </div>
+                <div class="slider-container">
+                    <label>⬇️ 下边界: <span id="valBottom">440</span></label>
+                    <input type="range" id="roiBottom" min="240" max="480" value="440">
+                </div>
+            </div>
+
+            <div class="slider-container" style="background:#1e1e1e; padding:5px; border-radius:8px; margin-bottom: 5px;">
+                <label>灰度二值化阈值: <span id="valThresh">65</span></label>
+                <input type="range" id="colorThresh" min="15" max="180" value="65" style="width:90%;">
             </div>
             
             <div class="data-row">
-                <div class="data-box">加速度: <span id="accel-val">0.00</span> m/s²</div>
-                <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
-            </div>
-            <div class="data-row" style="margin-top: -5px;">
-                <span class="engine-tag">MOG2 静态环境主动智能剔除已激活</span>
-                <span class="sub-data" style="color: #00ffff; font-weight: bold;">无视物理形变与漫反射抖动</span>
+                <div class="data-box">实时 a: <span id="accel-val">0.00</span> m/s²</div>
+                <div class="sub-data" style="line-height: 38px;">实时 v: <span id="speed-val">0.00</span> m/s</div>
             </div>
 
             <div id="chart-container">
@@ -65,36 +96,92 @@
         const startBtn = document.getElementById('startBtn');
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
-        const lrSlider = document.getElementById('learningRateSlider');
-        const lrVal = document.getElementById('lrVal');
+
+        const startRecBtn = document.getElementById('startRecBtn');
+        const stopRecBtn = document.getElementById('stopRecBtn');
+        const avgVal = document.getElementById('avg-val');
+        const statusHint = document.getElementById('status-hint');
+
+        const rLeft = document.getElementById('roiLeft'); const rRight = document.getElementById('roiRight');
+        const rTop = document.getElementById('roiTop'); const rBottom = document.getElementById('roiBottom');
+        const cThresh = document.getElementById('colorThresh');
+
+        const vLeft = document.getElementById('valLeft'); const vRight = document.getElementById('valRight');
+        const vTop = document.getElementById('valTop'); const vBottom = document.getElementById('valBottom');
+        const vThresh = document.getElementById('valThresh');
 
         const PX_PER_METER = 3200; 
         let isTracking = false;
-        let learningRate = 0.000; // 默认静止背景不刷新
 
         let lastTime = performance.now();
         let lastPos = null;
         let lastVelocity = 0;
+        
+        let lastUIUpdateTime = performance.now();
         let currentRealSpeed = 0;
         let currentRealAccel = 0;
+
+        // 数据高维录制存储
+        let isRecording = false;
+        let recordedAccelData = []; 
 
         let chartInstance;
         let chartLabels = Array(40).fill(''); 
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // OpenCV 高阶对象内存分配
-        let src, gray, fgmask, bgSubtractor, contours, hierarchy;
+        let src, gray, blurred, binary, maskROI, contours, hierarchy;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
             startBtn.style.display = 'inline-block';
         }
 
-        lrSlider.addEventListener('input', (e) => {
-            // 将0-100转换为0到0.01的微调速率
-            learningRate = parseFloat(e.target.value) / 10000;
-            lrVal.innerText = learningRate.toFixed(4);
+        function updateLabels() {
+            vLeft.innerText = rLeft.value; vRight.innerText = rRight.value;
+            vTop.innerText = rTop.value; vBottom.innerText = rBottom.value;
+            vThresh.innerText = cThresh.value;
+        }
+        [rLeft, rRight, rTop, rBottom, cThresh].forEach(s => s.addEventListener('input', updateLabels));
+
+        // 开始捕获
+        startRecBtn.addEventListener('click', () => {
+            recordedAccelData = []; 
+            isRecording = true;
+            startRecBtn.style.opacity = "0.4"; startRecBtn.disabled = true;
+            stopRecBtn.style.opacity = "1"; stopRecBtn.disabled = false;
+            statusHint.innerText = "🔴 正在高频收集滑行裸数据，请释放铝块...";
+            avgVal.innerText = "等待滑行结束";
+        });
+
+        // 核心进化：智能剔除抖动与零点，截取纯净下滑时段
+        stopRecBtn.addEventListener('click', () => {
+            isRecording = false;
+            startRecBtn.style.opacity = "1"; startRecBtn.disabled = false;
+            stopRecBtn.style.opacity = "0.4"; stopRecBtn.disabled = true;
+
+            // 1. 过滤掉几乎没有位移的静止数据点
+            let motionData = recordedAccelData.filter(x => x > 0.1);
+
+            if (motionData.length > 15) {
+                // 2. 【掐头逻辑】：丢弃前 10 个数据点（完美避开松手瞬间的手抖干扰波峰）
+                let stableSegment = motionData.slice(10); 
+                
+                // 3. 【去尾逻辑】：如果最后撞到底部产生反弹或骤停，去掉最后 3 个点
+                if (stableSegment.length > 5) {
+                    stableSegment = stableSegment.slice(0, -3);
+                }
+
+                // 4. 求最终纯净时段的算术平均值
+                let sum = stableSegment.reduce((a, b) => a + b, 0);
+                let avg = sum / stableSegment.length;
+
+                avgVal.innerText = avg.toFixed(2);
+                statusHint.innerText = `🟢 成功! 已自动丢弃前段人手抖动，基于 ${stableSegment.length} 帧平稳原始数据结算。`;
+            } else {
+                avgVal.innerText = "--";
+                statusHint.innerText = "❌ 录制时间太短或未捕获到持续有效的滑行位移。";
+            }
         });
 
         function initChart() {
@@ -104,13 +191,13 @@
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: '纯净运动运动加速度 (m/s²)',
+                        label: '瞬时加速度 (m/s²)',
                         data: chartData,
-                        borderColor: '#ff3366',
+                        borderColor: '#00f0ff',
                         borderWidth: 2,
                         pointRadius: 1, 
                         fill: true,
-                        backgroundColor: 'rgba(255, 51, 102, 0.04)',
+                        backgroundColor: 'rgba(0, 240, 255, 0.04)',
                         tension: 0 
                     }]
                 },
@@ -118,7 +205,7 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        y: { min: 0, max: 25, grid: { color: '#2a2a2a' }, ticks: { color: '#888' } },
+                        y: { min: 0, max: 25, grid: { color: '#333' }, ticks: { color: '#aaa' } },
                         x: { display: false }
                     },
                     plugins: { legend: { display: false } }
@@ -135,6 +222,7 @@
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 controls.style.display = 'block';
+                updateLabels();
                 initChart(); 
 
                 video.onloadedmetadata = () => {
@@ -143,40 +231,51 @@
                     
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
                     gray = new cv.Mat();
-                    fgmask = new cv.Mat();
+                    blurred = new cv.Mat();
+                    binary = new cv.Mat();
+                    maskROI = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC1);
                     contours = new cv.MatVector();
                     hierarchy = new cv.Mat();
-
-                    // 【核心科技】：初始化工业级混合高斯背景建模器
-                    // 历史帧设为500，阈值16，不检测阴影以获得最高速高频响应
-                    bgSubtractor = new cv.BackgroundSubtractorMOG2(500, 16, false);
 
                     isTracking = true;
                     lastTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
-                alert("高帧率实验相机激活失败: " + err.message);
+                alert("无法激活物理实验高帧相机: " + err.message);
             }
         });
 
         function trackLoop() {
             if (!isTracking) return;
 
-            // 绘制当前真实场景底图
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            let xMin = parseInt(rLeft.value); let xMax = parseInt(rRight.value);
+            let yMin = parseInt(rTop.value);  let yMax = parseInt(rBottom.value);
+            let thresh = parseInt(cThresh.value);
+
+            ctx.strokeStyle = '#ffcc00';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
+            ctx.setLineDash([]); 
+
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
-            // 1. 转为标准处理空间
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            cv.threshold(blurred, binary, thresh, 255, cv.THRESH_BINARY);
 
-            // 2. 【核心大招】：背景减除。静态的电脑、鼠标、滑道直接在fgmask里化为乌有（全黑）
-            // 只有动起来的铝块会变成一团纯白的白斑
-            bgSubtractor.apply(gray, fgmask, learningRate);
+            maskROI.setTo(new cv.Scalar(0)); 
+            let rectROI = new cv.Rect(xMin, yMin, xMax - xMin, yMax - yMin);
+            let roiRegion = maskROI.roi(rectROI);
+            roiRegion.setTo(new cv.Scalar(255)); 
+            roiRegion.delete(); 
 
-            // 3. 对剥离出的绝对运动像素区域提取轮廓
-            cv.findContours(fgmask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            cv.bitwise_and(binary, maskROI, binary);
+            cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let bestCenter = null;
             let maxArea = 0;
@@ -184,9 +283,7 @@
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                
-                // 排除由于相机画面微弱噪声带来的极小噪点块
-                if (area > 40 && area < 20000) {
+                if (area > 60 && area < 15000) {
                     if (area > maxArea) {
                         maxArea = area;
                         let M = cv.moments(cnt, false);
@@ -200,12 +297,10 @@
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
-            // 240FPS 无延迟物理数据结算
             if (bestCenter && dt > 0) {
-                // 绘制高亮粉色追踪环
                 ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 18, 0, 2 * Math.PI);
-                ctx.strokeStyle = '#ff3366';
+                ctx.arc(bestCenter.x, bestCenter.y, 16, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#00f0ff';
                 ctx.lineWidth = 3;
                 ctx.stroke();
 
@@ -217,10 +312,14 @@
                     currentRealSpeed = distancePx / PX_PER_METER / dt;
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
-                    // 100.0 安全抗震熔断机制
                     if (rawAccel > 100.0) rawAccel = 0.0;
 
                     currentRealAccel = rawAccel;
+                    
+                    if (isRecording) {
+                        recordedAccelData.push(currentRealAccel);
+                    }
+
                     lastVelocity = currentRealSpeed;
                 }
                 lastPos = { x: bestCenter.x, y: bestCenter.y };
@@ -231,11 +330,12 @@
                 lastPos = null;
             }
 
-            // 直出数据
-            speedVal.innerText = currentRealSpeed.toFixed(2);
-            accelVal.innerText = currentRealAccel.toFixed(2);
+            if (currentTime - lastUIUpdateTime >= 250) {
+                speedVal.innerText = currentRealSpeed.toFixed(2);
+                accelVal.innerText = currentRealAccel.toFixed(2);
+                lastUIUpdateTime = currentTime;
+            }
 
-            // 高敏动态图表
             if (currentTime - lastChartUpdateTime >= 50) {
                 chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
                 chartData.shift(); 
