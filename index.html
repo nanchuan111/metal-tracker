@@ -3,28 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>超高帧率专属追踪：仅追踪正方形金属 v6.0</title>
+    <title>全新视觉架构：HSV亮区质心追踪器 v7.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffff; overflow-y: auto; }
+        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ff66; overflow-y: auto; }
         .data-row { display: flex; justify-content: space-around; margin: 5px 0; align-items: center; }
-        .data-box { font-size: 24px; font-weight: bold; color: #00ffff; }
+        .data-box { font-size: 24px; font-weight: bold; color: #00ff66; }
         .sub-data { font-size: 16px; color: #aaa; }
-        button { padding: 10px 20px; font-size: 16px; background: #00ffff; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
+        button { padding: 10px 20px; font-size: 16px; background: #00ff66; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
         .slider-container { margin: 5px auto; width: 90%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
         input[type=range] { width: 60%; }
         #chart-container { width: 95%; max-width: 600px; height: 180px; margin: 10px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-        .engine-tag { font-size: 12px; color: #00ffcc; background: rgba(0,255,204,0.1); padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
+        .engine-tag { font-size: 12px; color: #000; background: #00ff66; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <div id="loading">正在加载 OpenCV.js 视觉引擎，请稍候...</div>
+    <div id="loading">正在加载全新 HSV 视觉引擎，请稍候...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -32,12 +32,12 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none;">开始高精度追踪</button>
+        <button id="startBtn" style="display:none;">开启新架构质心追踪</button>
         <div id="controls" style="display:none;">
             <div class="slider-container">
-                <label>边缘检测门限:</label>
-                <input type="range" id="thresholdSlider" min="10" max="250" value="70">
-                <span id="sliderVal">70</span>
+                <label>反光亮度阈值 (V):</label>
+                <input type="range" id="thresholdSlider" min="100" max="255" value="200">
+                <span id="sliderVal">200</span>
             </div>
             
             <div class="data-row">
@@ -45,8 +45,8 @@
                 <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
             </div>
             <div class="data-row" style="margin-top: -5px;">
-                <span class="engine-tag">⚡ 240FPS自适应相机联动 | 纯原始波形直出</span>
-                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">专属过滤：仅正方形目标</span>
+                <span class="engine-tag">HSV 连通域分级质心分析已启用</span>
+                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">无视断裂 | 240FPS自适应裸数据</span>
             </div>
 
             <div id="chart-container">
@@ -67,34 +67,33 @@
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
 
-        // --- 【核心物理校准：20cm 距离配置】 ---
+        // 20cm 距离物理校准
         const PX_PER_METER = 3200; 
         
         let isTracking = false;
-        let cannyThreshold = 70; 
+        let brightnessThreshold = 200; // 核心亮度截断值
 
-        // 时间与高频帧率自适应结算控制
         let lastTime = performance.now();
         let lastPos = null;
         let lastVelocity = 0;
         let currentRealSpeed = 0;
         let currentRealAccel = 0;
 
-        // 图表图表控制（由于高频，扩展到40个点防止图像压缩太严重）
+        // 图表控制
         let chartInstance;
         let chartLabels = Array(40).fill(''); 
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // OpenCV 内存对象
-        let src, gray, blurred, edges, contours, hierarchy, approx;
+        // OpenCV 核心内存分配
+        let src, hsv, mask, labels, stats, centroids;
+        let lowHSV, highHSV;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
             startBtn.style.display = 'inline-block';
         }
 
-        // 初始化图表（裸数据，折线无弯曲）
         function initChart() {
             const chartCtx = document.getElementById('accelChart').getContext('2d');
             chartInstance = new Chart(chartCtx, {
@@ -102,14 +101,14 @@
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: '超高频原始加速度 (m/s²)',
+                        label: '质心位移加速度 (m/s²)',
                         data: chartData,
-                        borderColor: '#00ffff',
+                        borderColor: '#00ff66',
                         borderWidth: 2,
                         pointRadius: 1, 
                         fill: true,
-                        backgroundColor: 'rgba(0, 255, 255, 0.05)',
-                        tension: 0 // 0张力，完美保留高频震荡细节
+                        backgroundColor: 'rgba(0, 255, 102, 0.05)',
+                        tension: 0 
                     }]
                 },
                 options: {
@@ -118,7 +117,7 @@
                     scales: {
                         y: {
                             min: 0,
-                            max: 30, // 帧率提高后，单帧微小的像素位移跳变计算出的加速度理论上限会更高，适度放大图表
+                            max: 30, 
                             grid: { color: '#333' },
                             ticks: { color: '#aaa' }
                         },
@@ -130,20 +129,14 @@
         }
 
         thresholdSlider.addEventListener('input', (e) => {
-            cannyThreshold = parseInt(e.target.value);
-            sliderVal.innerText = cannyThreshold;
+            brightnessThreshold = parseInt(e.target.value);
+            sliderVal.innerText = brightnessThreshold;
         });
 
         startBtn.addEventListener('click', async () => {
             try {
-                // 尽最大可能向浏览器申请高帧率配置
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { 
-                        facingMode: "environment", 
-                        width: { ideal: 640 }, 
-                        height: { ideal: 480 },
-                        frameRate: { ideal: 240, min: 60 } // 申请240帧（如果硬件和特定环境支持）
-                    },
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 240 } },
                     audio: false
                 });
                 video.srcObject = stream;
@@ -154,19 +147,24 @@
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
+                    
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
-                    gray = new cv.Mat();
-                    blurred = new cv.Mat();
-                    edges = new cv.Mat();
-                    contours = new cv.MatVector();
-                    hierarchy = new cv.Mat();
-                    approx = new cv.Mat(); // 初始化几何多边形容器
+                    hsv = new cv.Mat();
+                    mask = new cv.Mat();
+                    labels = new cv.Mat();
+                    stats = new cv.Mat();
+                    centroids = new cv.Mat();
+                    
+                    // 动态更新的 HSV 边界阈值容器
+                    lowHSV = new cv.Mat(1, 3, cv.CV_8UC1);
+                    highHSV = new cv.Mat(1, 3, cv.CV_8UC1);
+
                     isTracking = true;
                     lastTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
-                alert("无法获取相机权限或高帧率未被硬件接受: " + err.message);
+                alert("相机初始化失败: " + err.message);
             }
         });
 
@@ -177,96 +175,85 @@
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-            cv.Canny(blurred, edges, cannyThreshold, cannyThreshold * 2);
-            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            // 1. 转换到 HSV 空间
+            cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+            cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
+
+            // 2. 动态构建阈值：锁定色调任意(0-180)，饱和度极低(0-50)代表银白金属，亮度高(用户控制)代表反光区
+            lowHSV.data[0] = 0;   lowHSV.data[1] = 0;   lowHSV.data[2] = brightnessThreshold;
+            highHSV.data[0] = 180; highHSV.data[1] = 60;  highHSV.data[2] = 255;
+
+            // 3. 颜色二值化提取掩膜
+            cv.inRange(hsv, lowHSV, highHSV, mask);
+
+            // 4. 执行连通域分析（提取画面中所有成片的亮斑及其中心）
+            let numLabels = cv.connectedComponentsWithStats(mask, labels, stats, centroids);
 
             let bestCenter = null;
             let maxArea = 0;
 
-            // --- 【专属模式：形状约束算法重新装载】 ---
-            for (let i = 0; i < contours.size(); ++i) {
-                let cnt = contours.get(i);
-                let area = cv.contourArea(cnt);
+            // 从索引 1 开始（0 是黑色背景连通域）
+            for (let i = 1; i < numLabels; i++) {
+                // 读取该连通域的面积
+                let area = stats.getIntAt(i, cv.CC_STAT_AREA);
                 
-                // 1. 20cm下的正方形面积过滤
-                if (area > 120 && area < 6500) {
-                    
-                    // 2. 几何特征判定：多边形逼近
-                    let perimeter = cv.arcLength(cnt, true);
-                    cv.approxPolyDP(cnt, approx, 0.04 * perimeter, true);
-                    
-                    // 判定A：必须正好是4个顶点（四边形）且为凸多边形
-                    if (approx.rows === 4 && cv.isContourConvex(approx)) {
-                        
-                        // 3. 饱满度(Solidity)方正度过滤：无视无规则噪点
-                        let rect = cv.boundingRect(cnt);
-                        let rectArea = rect.width * rect.height;
-                        let solidity = area / rectArea;
-                        
-                        // 判定B：正方形饱满度极高，必须大于0.82
-                        if (solidity > 0.82) {
-                            if (area > maxArea) {
-                                maxArea = area;
-                                let M = cv.moments(cnt, false);
-                                if (M.m00 !== 0) {
-                                    bestCenter = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
-                                }
-                            }
-                        }
+                // 面积初筛：20cm距离下亮斑块的合理像素面积范围
+                if (area > 100 && area < 8000) {
+                    if (area > maxArea) {
+                        maxArea = area;
+                        // 直接从质心矩阵中提取 X 和 Y 坐标（物理重心的绝对几何中心）
+                        bestCenter = {
+                            x: centroids.getDoubleAt(i, 0),
+                            y: centroids.getDoubleAt(i, 1)
+                        };
                     }
                 }
             }
 
             const currentTime = performance.now();
-            // 自适应 dt：不管硬件传来的是 60FPS 还是 240FPS，直接用真实的每帧物理间隔计算
             const dt = (currentTime - lastTime) / 1000;
 
-            // --- 【解开时间锁死：随相机刷新进行超高频物理结算】 ---
+            // --- 240FPS 自适应无延迟裸数据结算 ---
             if (bestCenter && dt > 0) {
-                // 绘制锁定青色靶心
+                // 绘制新版绿色高亮质心追踪圈
                 ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 18, 0, 2 * Math.PI);
-                ctx.strokeStyle = '#00ffff';
+                ctx.arc(bestCenter.x, bestCenter.y, 15, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#00ff66';
                 ctx.lineWidth = 3;
                 ctx.stroke();
+
+                ctx.fillStyle = '#00ff66';
+                ctx.beginPath();
+                ctx.arc(bestCenter.x, bestCenter.y, 4, 0, 2 * Math.PI);
+                ctx.fill();
 
                 if (lastPos) {
                     const dx = bestCenter.x - lastPos.x;
                     const dy = bestCenter.y - lastPos.y;
                     const distancePx = Math.sqrt(dx * dx + dy * dy);
 
-                    // 1. 裸速度直出
                     currentRealSpeed = distancePx / PX_PER_METER / dt;
-                    
-                    // 2. 裸加速度直出（移除一切突变和滤波，响应慢动作相机的微观物理抖动）
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
-                    // 3. 100 m/s² 强行熔断归零底层保障
-                    if (rawAccel > 100.0) {
-                        rawAccel = 0.0;
-                    }
+                    // 底层 100 熔断保护
+                    if (rawAccel > 100.0) rawAccel = 0.0;
 
                     currentRealAccel = rawAccel;
                     lastVelocity = currentRealSpeed;
                 }
                 lastPos = { x: bestCenter.x, y: bestCenter.y };
             } else {
-                // 丢失目标瞬间归零
                 currentRealSpeed = 0;
                 currentRealAccel = 0;
                 lastVelocity = 0;
                 lastPos = null;
             }
 
-            // 数据无残留，每帧无延迟输出到文本
+            // UI 刷新
             speedVal.innerText = currentRealSpeed.toFixed(2);
             accelVal.innerText = currentRealAccel.toFixed(2);
 
-            // --- 【图像生成平滑控制】 ---
-            // 虽然计算是超高频无延迟的，但图表没必要每帧刷新（不仅肉眼看不清，且极其消耗手机GPU）
-            // 图表保持 0.05秒（50毫秒）的高敏流动，捕获每一次高帧率抓到的尖峰波形
+            // 图表 50ms 频率高敏更新
             if (currentTime - lastChartUpdateTime >= 50) {
                 chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
                 chartData.shift(); 
