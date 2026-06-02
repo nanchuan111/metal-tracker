@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>物理实验：20cm高频零点响应结算系统 v23.0</title>
+    <title>物理实验：最高帧率全开结算系统 v24.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 35vh; max-width: 640px; margin: 0 auto; background: #000; }
@@ -27,7 +27,7 @@
 </head>
 <body>
 
-    <div id="loading">正在加载 20cm 锁定高频超灵敏结算引擎...</div>
+    <div id="loading">正在加载最高帧率全开结算引擎...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -35,17 +35,17 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">启动高斯背景实验系统</button>
+        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">启动最高帧率实验系统</button>
         
         <div id="controls" style="display:none;">
             <div id="record-console">
-                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">🔬 20cm 标定 + 高频全速响应控制台 (上限锁死 10 m/s²)</div>
+                <div style="font-size: 13px; color: #00ff66; font-weight: bold;">⚡ 相机当前工作帧率: <span id="fps-display">--</span> FPS</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
                     <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 智能检索并结算</button>
                 </div>
                 <div id="avg-display">📊 黄金滑行段平均 a: <span id="avg-val">--</span> m/s²</div>
-                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">按住方块静止 ➔ 点开始 ➔ 见数据全0 ➔ 放手 ➔ 停稳后点结算</div>
+                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">采用硬件最高帧率流输入</div>
             </div>
 
             <div class="slider-container" style="background:#1e1e1e; padding:5px; border-radius:8px;">
@@ -76,13 +76,14 @@
         const stopRecBtn = document.getElementById('stopRecBtn');
         const avgVal = document.getElementById('avg-val');
         const statusHint = document.getElementById('status-hint');
+        const fpsDisplay = document.getElementById('fps-display');
         const lrSlider = document.getElementById('lrSlider');
         const vLR = document.getElementById('valLR');
 
-        // 📏 【20cm 核心物理标定参数】
-        const REAL_DISTANCE_M = 0.20; // 真实滑行距离 20cm = 0.20米
-        const TRACK_PIXELS = 400;     // 画面中这 20cm 对应的像素跨度 (根据手机画面可微调)
-        const PX_PER_METER = TRACK_PIXELS / REAL_DISTANCE_M; // 自动推导每米像素比
+        // 📏 20cm 核心物理标定参数
+        const REAL_DISTANCE_M = 0.20; 
+        const TRACK_PIXELS = 400;     
+        const PX_PER_METER = TRACK_PIXELS / REAL_DISTANCE_M; 
 
         let isTracking = false;
         let learningRate = 0.0000;
@@ -99,6 +100,10 @@
         let chartLabels = Array(40).fill(''); 
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
+
+        // 用于计算真实渲染 FPS 的计数器
+        let fpsFrameCount = 0;
+        let fpsLastTime = performance.now();
 
         let src, gray, fgmask, bgSubtractor, contours, hierarchy;
 
@@ -117,7 +122,7 @@
             isRecording = true;
             startRecBtn.style.opacity = "0.4"; startRecBtn.disabled = true;
             stopRecBtn.style.opacity = "1"; stopRecBtn.disabled = false;
-            statusHint.innerText = "🔴 高速引擎录制中...请静止等待全0出现再放手。";
+            statusHint.innerText = "🔴 高速录制中...请静止等待全0出现再放手。";
             avgVal.innerText = "等待放手";
         });
 
@@ -132,7 +137,6 @@
                 return;
             }
 
-            // 1. 自动跨越全0静止期，寻找放手触发点
             let motionStartIndex = -1;
             for (let i = 0; i < recordedAccelData.length; i++) {
                 if (recordedAccelData[i] > 0.15) {
@@ -147,22 +151,20 @@
                 return;
             }
 
-            // 2. 跨越放手手震期（往后跳 6 帧，直奔纯净下滑段）
+            // 根据高帧率自适应：如果FPS大于60，手震期需要留出更多帧（这里保持跳过6帧，可根据高频效果微调）
             let realDataStart = motionStartIndex + 6;
             let stableSegment = recordedAccelData.slice(realDataStart);
 
-            // 3. 过滤并修剪触底反弹段
             stableSegment = stableSegment.filter(x => x > 0.1); 
             if (stableSegment.length > 4) {
-                stableSegment = stableSegment.slice(0, -2); // 剪掉末尾撞击振荡
+                stableSegment = stableSegment.slice(0, -2); 
             }
 
-            // 4. 精准均值计算
             if (stableSegment.length > 0) {
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
                 avgVal.innerText = avg.toFixed(2);
-                statusHint.innerText = `🟢 成功结算！已成功剥离静止期，抓取黄金段 ${stableSegment.length} 帧数据。`;
+                statusHint.innerText = `🟢 成功结算！已成功抓取黄金段 ${stableSegment.length} 帧数据。`;
             } else {
                 avgVal.innerText = "--";
                 statusHint.innerText = "❌ 有效滑动帧不足。";
@@ -200,10 +202,26 @@
 
         startBtn.addEventListener('click', async () => {
             try {
+                // 🌟 【核心解封参数】：强制通过降低分辨率，夹击触发底层硬件的超高帧率流
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment" },
+                    video: { 
+                        facingMode: "environment",
+                        width: { ideal: 640 },  // 必须把分辨率压在 640x480 内，硬件带宽才足够吐出 60+ FPS
+                        height: { ideal: 480 },
+                        frameRate: { 
+                            min: 60,            // 最低要求 60 帧
+                            ideal: 240          // 理想冲刺 240 帧 (针对部分高刷屏手机)
+                        }
+                    },
                     audio: false
                 });
+                
+                // 打印当前浏览器最终批准允许的具体配置（用于在控制台Debug查看）
+                const tracks = stream.getVideoTracks();
+                if(tracks.length > 0) {
+                    console.log("成功向手机索取到相机参数：", tracks[0].getSettings());
+                }
+
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 controls.style.display = 'block';
@@ -223,15 +241,31 @@
 
                     isTracking = true;
                     lastTime = performance.now();
+                    fpsLastTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
-                alert("摄像头启动失败: " + err.message);
+                alert("摄像头高帧率初始化失败，正在尝试标准模式拉取: " + err.message);
+                // 降级兜底方案
+                try {
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+                    video.srcObject = fallbackStream;
+                    startBtn.style.display = 'none'; controls.style.display = 'block'; initChart();
+                } catch(e) { alert("相机彻底不可用。"); }
             }
         });
 
         function trackLoop() {
             if (!isTracking) return;
+
+            // 测量实际工作 FPS
+            fpsFrameCount++;
+            const nowTime = performance.now();
+            if (nowTime - fpsLastTime >= 1000) {
+                fpsDisplay.innerText = fpsFrameCount;
+                fpsFrameCount = 0;
+                fpsLastTime = nowTime;
+            }
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -279,7 +313,6 @@
                     let currentRealSpeed = distancePx / PX_PER_METER / dt;
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
-                    // 物理硬顶卡点
                     if (rawAccel > 10.0) {
                         rawAccel = 0.0;
                     }
@@ -302,10 +335,8 @@
                 }
             }
 
-            // ⚡ 解开封印：取消 250ms 人眼限速，数字直接随运算逐帧高频同步刷新！
             accelVal.innerText = currentRealAccel.toFixed(2);
 
-            // 图表无延迟高频更新
             if (currentTime - lastChartUpdateTime >= 30) {
                 chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
                 chartData.shift(); 
