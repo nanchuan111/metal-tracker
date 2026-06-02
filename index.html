@@ -3,28 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>斜坡定制：蓝色滑道缺陷追踪器 v10.0</title>
+    <title>滑道专属：局部轨道限制追踪器 v11.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #3399ff; overflow-y: auto; }
+        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #00ffcc; overflow-y: auto; }
         .data-row { display: flex; justify-content: space-around; margin: 5px 0; align-items: center; }
-        .data-box { font-size: 24px; font-weight: bold; color: #3399ff; }
+        .data-box { font-size: 24px; font-weight: bold; color: #00ffcc; }
         .sub-data { font-size: 16px; color: #aaa; }
-        button { padding: 10px 20px; font-size: 16px; background: #3399ff; color: #fff; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
+        button { padding: 10px 20px; font-size: 16px; background: #00ffcc; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
         .slider-container { margin: 5px auto; width: 90%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
-        input[type=range] { width: 60%; }
-        #chart-container { width: 95%; max-width: 600px; height: 180px; margin: 10px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
+        input[type=range] { width: 50%; }
+        #chart-container { width: 95%; max-width: 600px; height: 160px; margin: 10px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-        .engine-tag { font-size: 12px; color: #fff; background: #3399ff; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
+        .engine-tag { font-size: 12px; color: #000; background: #00ffcc; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <div id="loading">正在加载斜坡定制版视觉引擎，请稍候...</div>
+    <div id="loading">正在加载局部轨道限制版引擎...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -32,12 +32,20 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none;">开启滑道色块差分追踪</button>
+        <button id="startBtn" style="display:none;">启动相机</button>
+        
         <div id="controls" style="display:none;">
             <div class="slider-container">
-                <label>蓝色识别宽容度:</label>
-                <input type="range" id="thresholdSlider" min="15" max="60" value="30">
-                <span id="sliderVal">30</span>
+                <label>限制框左边界:</label>
+                <input type="range" id="roiLeft" min="0" max="300" value="50">
+            </div>
+            <div class="slider-container">
+                <label>限制框右边界:</label>
+                <input type="range" id="roiRight" min="300" max="640" value="590">
+            </div>
+            <div class="slider-container">
+                <label>目标色彩敏感度:</label>
+                <input type="range" id="colorThresh" min="30" max="180" value="90">
             </div>
             
             <div class="data-row">
@@ -45,7 +53,7 @@
                 <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
             </div>
             <div class="data-row" style="margin-top: -5px;">
-                <span class="engine-tag">逆向追踪：滑道覆盖异物检测模式</span>
+                <span class="engine-tag">局部安全轨道电子栅栏已启用</span>
                 <span class="sub-data" style="color: #ffcc00; font-weight: bold;">240FPS自适应裸数据直出</span>
             </div>
 
@@ -62,16 +70,16 @@
         const accelVal = document.getElementById('accel-val');
         const speedVal = document.getElementById('speed-val');
         const startBtn = document.getElementById('startBtn');
-        const thresholdSlider = document.getElementById('thresholdSlider');
-        const sliderVal = document.getElementById('sliderVal');
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
 
-        // 由于斜坡存在透视畸变，这里作为相对像素物理位移估算，维持原标定
+        // 空间边界控制
+        const roiLeftSlider = document.getElementById('roiLeft');
+        const roiRightSlider = document.getElementById('roiRight');
+        const colorSlider = document.getElementById('colorThresh');
+
         const PX_PER_METER = 3200; 
-        
         let isTracking = false;
-        let blueTolerance = 30; // 蓝色H通道的过滤宽容度
 
         let lastTime = performance.now();
         let lastPos = null;
@@ -84,9 +92,8 @@
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // OpenCV 核心组件
-        let src, hsv, blueMask, inverseMask, labels, stats, centroids;
-        let lowBlue, highBlue;
+        // OpenCV 内存
+        let src, gray, blurred, edgeMask, contours, hierarchy;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
@@ -100,13 +107,13 @@
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: '覆盖物移动加速度 (m/s²)',
+                        label: '实时加速度 (m/s²)',
                         data: chartData,
-                        borderColor: '#3399ff',
+                        borderColor: '#00ffcc',
                         borderWidth: 2,
                         pointRadius: 1, 
                         fill: true,
-                        backgroundColor: 'rgba(51, 153, 255, 0.04)',
+                        backgroundColor: 'rgba(0, 255, 204, 0.04)',
                         tension: 0 
                     }]
                 },
@@ -121,11 +128,6 @@
                 }
             });
         }
-
-        thresholdSlider.addEventListener('input', (e) => {
-            blueTolerance = parseInt(e.target.value);
-            sliderVal.innerText = blueTolerance;
-        });
 
         startBtn.addEventListener('click', async () => {
             try {
@@ -143,22 +145,18 @@
                     canvas.height = video.videoHeight;
                     
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
-                    hsv = new cv.Mat();
-                    blueMask = new cv.Mat();
-                    inverseMask = new cv.Mat();
-                    labels = new cv.Mat();
-                    stats = new cv.Mat();
-                    centroids = new cv.Mat();
-                    
-                    lowBlue = new cv.Mat(1, 3, cv.CV_8UC1);
-                    highBlue = new cv.Mat(1, 3, cv.CV_8UC1);
+                    gray = new cv.Mat();
+                    blurred = new cv.Mat();
+                    edgeMask = new cv.Mat();
+                    contours = new cv.MatVector();
+                    hierarchy = new cv.Mat();
 
                     isTracking = true;
                     lastTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
-                alert("相机初始化失败: " + err.message);
+                alert("无法激活高帧率相机: " + err.message);
             }
         });
 
@@ -166,49 +164,46 @@
             if (!isTracking) return;
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // 获取实时的滑块空间限制值
+            let rLeft = parseInt(roiLeftSlider.value);
+            let rRight = parseInt(roiRightSlider.value);
+            let cThresh = parseInt(colorSlider.value);
+
+            // 绘制物理电子约束框（红线包围区），把屏幕两边的笔记本和鼠标强制切除
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(rLeft, 0, rRight - rLeft, canvas.height);
+
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
-            // 1. 转到 HSV 色彩空间精准看颜色
-            cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
-            cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
-
-            // 2. 牢牢锁定滑道的亮蓝色区间（标准蓝色 H 约为 100-125 附近）
-            // 根据调节的宽容度，抓取纯蓝色大滑道
-            lowBlue.data[0] = 100 - blueTolerance;  lowBlue.data[1] = 60;  lowBlue.data[2] = 50;
-            highBlue.data[0] = 115 + blueTolerance; highBlue.data[1] = 255; highBlue.data[2] = 255;
-            cv.inRange(hsv, lowBlue, highBlue, blueMask);
-
-            // 3. 【黑科技核心】：取反！提取出蓝色滑道中“被方块吃掉、遮挡的不蓝区域”
-            cv.bitwise_not(blueMask, inverseMask);
-
-            // 4. 对被遮挡的异物碎块进行连通域质心分析
-            let numLabels = cv.connectedComponentsWithStats(inverseMask, labels, stats, centroids);
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+            
+            // 采用局部高对比度亮度差分
+            cv.threshold(blurred, edgeMask, cThresh, 255, cv.THRESH_BINARY);
+            cv.findContours(edgeMask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let bestCenter = null;
             let maxArea = 0;
 
-            for (let i = 1; i < numLabels; i++) {
-                let area = stats.getIntAt(i, cv.CC_STAT_AREA);
+            for (let i = 0; i < contours.size(); ++i) {
+                let cnt = contours.get(i);
+                let area = cv.contourArea(cnt);
                 
-                // 限制在滑道中移动的异物像素面积合理区间
-                if (area > 150 && area < 10000) {
-                    
-                    // 过滤掉整个屏幕中除了滑道外大面积的黑背景（背景面积往往极大）
-                    // 真正方块在斜坡上遮挡出的无蓝区，其宽和高应该在合理比例范围内
-                    let left = stats.getIntAt(i, cv.CC_STAT_LEFT);
-                    let top = stats.getIntAt(i, cv.CC_STAT_TOP);
-                    let width = stats.getIntAt(i, cv.CC_STAT_WIDTH);
-                    let height = stats.getIntAt(i, cv.CC_STAT_HEIGHT);
+                if (area > 100 && area < 12000) {
+                    let M = cv.moments(cnt, false);
+                    if (M.m00 !== 0) {
+                        let cx = M.m10 / M.m00;
+                        let cy = M.m01 / M.m00;
 
-                    // 避免捕获全屏两侧的无关黑色边缘
-                    if (left > 10 && (left + width) < (canvas.width - 10)) {
-                        if (area > maxArea) {
-                            maxArea = area;
-                            bestCenter = {
-                                x: centroids.getDoubleAt(i, 0),
-                                y: centroids.getDoubleAt(i, 1)
-                            };
+                        // 【核心卡锁】：计算出来的质心必须落在你手动拉出来的红框电子栅栏内部！
+                        if (cx > rLeft && cx < rRight) {
+                            if (area > maxArea) {
+                                maxArea = area;
+                                bestCenter = { x: cx, y: cy };
+                            }
                         }
                     }
                 }
@@ -217,19 +212,14 @@
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
-            // 无阻碍直接结算位移
+            // 240FPS 无锁原始解算
             if (bestCenter && dt > 0) {
-                // 绘制锁定遮挡物特征环
+                // 绘制青色动态瞄准点
                 ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 18, 0, 2 * Math.PI);
-                ctx.strokeStyle = '#3399ff';
+                ctx.arc(bestCenter.x, bestCenter.y, 16, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#00ffcc';
                 ctx.lineWidth = 3;
                 ctx.stroke();
-
-                ctx.fillStyle = '#3399ff';
-                ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 4, 0, 2 * Math.PI);
-                ctx.fill();
 
                 if (lastPos) {
                     const dx = bestCenter.x - lastPos.x;
