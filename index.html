@@ -3,14 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>物理实验：高斯背景减除黄金时段结算系统 v20.0</title>
+    <title>物理实验：高斯背景自适应零点唤醒系统 v22.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 35vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
         #dashboard { height: 65vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #ff3366; overflow-y: auto; }
         
-        /* 核心增设：实验均制录制控制台 */
         #record-console { background: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #444; }
         .btn-group { display: flex; justify-content: center; gap: 10px; margin-top: 5px; }
         .btn-action { padding: 10px 18px; font-size: 14px; font-weight: bold; border: none; border-radius: 20px; cursor: pointer; }
@@ -28,7 +27,7 @@
 </head>
 <body>
 
-    <div id="loading">正在加载高斯背景平均值录制版引擎...</div>
+    <div id="loading">正在加载高斯背景零点唤醒版引擎...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -40,13 +39,13 @@
         
         <div id="controls" style="display:none;">
             <div id="record-console">
-                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">🔬 黄金时段自动去噪加速计</div>
+                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">🔬 零点自适应识别算法 (上限锁死 10 m/s²)</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
-                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 过滤异常并结算</button>
+                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 智能检索并结算</button>
                 </div>
                 <div id="avg-display">真实滑行加速度 a: <span id="avg-val">--</span> m/s²</div>
-                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">准备就绪，请点击开始捕获</div>
+                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">请按住铝块静止，点击“开始捕获”后再松手</div>
             </div>
 
             <div class="slider-container" style="background:#1e1e1e; padding:5px; border-radius:8px;">
@@ -73,7 +72,6 @@
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
 
-        // 录制相关控制节点
         const startRecBtn = document.getElementById('startRecBtn');
         const stopRecBtn = document.getElementById('stopRecBtn');
         const avgVal = document.getElementById('avg-val');
@@ -91,7 +89,6 @@
         let lastUIUpdateTime = performance.now();
         let currentRealAccel = 0;
 
-        // 高频数据录制池
         let isRecording = false;
         let recordedAccelData = []; 
 
@@ -100,7 +97,6 @@
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // 严格使用原高斯代码的核心矩阵
         let src, gray, fgmask, bgSubtractor, contours, hierarchy;
 
         function onOpenCvReady() {
@@ -113,40 +109,63 @@
             vLR.innerText = learningRate.toFixed(4);
         });
 
-        // 点击开始捕获
         startRecBtn.addEventListener('click', () => {
             recordedAccelData = []; 
             isRecording = true;
             startRecBtn.style.opacity = "0.4"; startRecBtn.disabled = true;
             stopRecBtn.style.opacity = "1"; stopRecBtn.disabled = false;
-            statusHint.innerText = "🔴 正在高频收集滑行裸数据，请释放铝块...";
-            avgVal.innerText = "等待滑行结束";
+            statusHint.innerText = "🔴 已开启录制。请保持静止一段时间（全0），随后放手滑行...";
+            avgVal.innerText = "等待放手实验";
         });
 
-        // 黄金时段自适应结算逻辑
+        // 🧠 核心增设：自适应零点跳跃寻轨算法
         stopRecBtn.addEventListener('click', () => {
             isRecording = false;
             startRecBtn.style.opacity = "1"; startRecBtn.disabled = false;
             stopRecBtn.style.opacity = "0.4"; stopRecBtn.disabled = true;
 
-            // 过滤无动态位移点
-            let motionData = recordedAccelData.filter(x => x > 0.1);
+            if (recordedAccelData.length < 5) {
+                avgVal.innerText = "--";
+                statusHint.innerText = "❌ 录制时间过短。";
+                return;
+            }
 
-            if (motionData.length > 15) {
-                // 【黄金时段截取】
-                let stableSegment = motionData.slice(10); // 掐头：切掉刚放手时人手和按钮带来的尖峰抖动
-                if (stableSegment.length > 5) {
-                    stableSegment = stableSegment.slice(0, -3); // 去尾：切掉滑落到底反弹的异常值
+            // 1. 在数据队列中往后查找，直到发现第一个真正产生运动的点（突破连续0）
+            let motionStartIndex = -1;
+            for (let i = 0; i < recordedAccelData.length; i++) {
+                if (recordedAccelData[i] > 0.15) { // 阈值0.15代表打破静止死区
+                    motionStartIndex = i;
+                    break;
                 }
+            }
 
+            if (motionStartIndex === -1) {
+                avgVal.innerText = "--";
+                statusHint.innerText = "❌ 没检测到放手后的有效滑动（全为0或震动过小）。";
+                return;
+            }
+
+            // 2. 【核心卡点】：找到突破零点的时机后，往后跳过 6 帧（完美避开刚放手时的手指摩擦与剧烈抖动）
+            let realDataStart = motionStartIndex + 6;
+            
+            // 3. 截取从“放手稳定后”到“录制结束/触底前”的纯净下滑长数据段
+            let stableSegment = recordedAccelData.slice(realDataStart);
+
+            // 4. 去除最后撞击阶段（或者是下滑结束重新归0后的静止点）
+            stableSegment = stableSegment.filter(x => x > 0.1); 
+            if (stableSegment.length > 4) {
+                stableSegment = stableSegment.slice(0, -2); // 掐掉最后触底反弹的 2 帧
+            }
+
+            // 5. 最终科学结算
+            if (stableSegment.length > 0) {
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
-
                 avgVal.innerText = avg.toFixed(2);
-                statusHint.innerText = `🟢 成功! 基于 MOG2 提取的 ${stableSegment.length} 帧平稳数据结算。`;
+                statusHint.innerText = `🟢 成功！跳过前段连续0与松手手震，提取平稳下滑段共 ${stableSegment.length} 帧计算。`;
             } else {
                 avgVal.innerText = "--";
-                statusHint.innerText = "❌ 录制时间太短或未捕捉到有效位移数据。";
+                statusHint.innerText = "❌ 过滤手震后，未发现足够的持续滑动有效帧。";
             }
         });
 
@@ -171,7 +190,7 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        y: { min: 0, max: 25, grid: { color: '#333' }, ticks: { color: '#aaa' } },
+                        y: { min: 0, max: 12, grid: { color: '#333' }, ticks: { color: '#aaa' } }, 
                         x: { display: false }
                     },
                     plugins: { legend: { display: false } }
@@ -179,7 +198,6 @@
             });
         }
 
-        // 🌟 100% 还原你之前能正常调起摄像头的原装按钮启动逻辑
         startBtn.addEventListener('click', async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
@@ -201,7 +219,6 @@
                     contours = new cv.MatVector();
                     hierarchy = new cv.Mat();
 
-                    // 使用之前能跑的高斯差分检测器
                     bgSubtractor = new cv.BackgroundSubtractorMOG2(500, 16, false);
 
                     isTracking = true;
@@ -216,7 +233,6 @@
         function trackLoop() {
             if (!isTracking) return;
 
-            // 还原原来的黑白高斯图像直接渲染模式，保证绝对不产生内存黑屏冲突
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
@@ -224,7 +240,6 @@
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
             bgSubtractor.apply(gray, fgmask, learningRate);
 
-            // 寻找轮廓
             cv.findContours(fgmask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let bestCenter = null;
@@ -244,14 +259,12 @@
                 }
             }
 
-            // 将高斯处理后的黑白动态结果输出到屏幕上（原汁原味）
             cv.imshow('canvas', fgmask);
 
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
             if (bestCenter && dt > 0) {
-                // 在黑白二值图上画出粉色跟踪靶心
                 ctx.beginPath();
                 ctx.arc(bestCenter.x, bestCenter.y, 16, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#ff3366';
@@ -266,10 +279,13 @@
                     let currentRealSpeed = distancePx / PX_PER_METER / dt;
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
-                    if (rawAccel > 100.0) rawAccel = 0.0;
+                    // 超过10归零卡点
+                    if (rawAccel > 10.0) {
+                        rawAccel = 0.0;
+                    }
+
                     currentRealAccel = rawAccel;
                     
-                    // ⏱️ 核心灌入：点击捕获后，在后台把纯净的高斯运动像素所产生的加速度塞进数组
                     if (isRecording) {
                         recordedAccelData.push(currentRealAccel);
                     }
@@ -281,15 +297,17 @@
                 currentRealAccel = 0;
                 lastVelocity = 0;
                 lastPos = null;
+                // 如果在录制中突然检测不到目标，也记入 0，保持时间轴连续
+                if (isRecording) {
+                    recordedAccelData.push(0.0);
+                }
             }
 
-            // 250ms 阻尼刷新数字
             if (currentTime - lastUIUpdateTime >= 250) {
                 accelVal.innerText = currentRealAccel.toFixed(2);
                 lastUIUpdateTime = currentTime;
             }
 
-            // 图表更新
             if (currentTime - lastChartUpdateTime >= 50) {
                 chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
                 chartData.shift(); 
