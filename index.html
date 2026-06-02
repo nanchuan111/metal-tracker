@@ -3,48 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>物理实验：高斯背景减除黄金时段结算系统 v18.0</title>
+    <title>物理实验：高斯背景减除黄金时段结算系统 v20.0</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #121212; color: #fff; text-align: center; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 35vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 65vh; padding: 10px; box-sizing: border-box; background: #1e1e1e; border-top: 3px solid #ff3366; overflow-y: auto; }
+        #dashboard { height: 65vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #ff3366; overflow-y: auto; }
         
-        #record-console { background: #252525; padding: 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #333; }
+        /* 核心增设：实验均制录制控制台 */
+        #record-console { background: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #444; }
         .btn-group { display: flex; justify-content: center; gap: 10px; margin-top: 5px; }
         .btn-action { padding: 10px 18px; font-size: 14px; font-weight: bold; border: none; border-radius: 20px; cursor: pointer; }
-        #startRecBtn { background: #ff3366; color: #fff; box-shadow: 0 4px 10px rgba(255,51,102,0.2); }
+        #startRecBtn { background: #ff3366; color: #fff; }
         #stopRecBtn { background: #ffaa00; color: #000; }
         #avg-display { font-size: 20px; color: #ff3366; margin-top: 6px; font-weight: bold; background: #151515; padding: 6px; border-radius: 6px; }
 
-        .grid-sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; background: #252525; border-radius: 8px; margin-bottom: 6px; }
-        .slider-container { display: flex; flex-direction: column; align-items: center; font-size: 12px; color: #ccc; }
+        .slider-container { display: flex; flex-direction: column; align-items: center; font-size: 12px; color: #ccc; margin: 6px 0; }
         input[type=range] { width: 85%; margin-top: 2px; }
-        #chart-container { width: 95%; max-width: 600px; height: 120px; margin: 5px auto; background: #151515; border-radius: 8px; padding: 5px; border: 1px solid #333; }
+        #chart-container { width: 95%; max-width: 600px; height: 120px; margin: 5px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-
-        /* 🔒 权限错误提示框 */
-        #error-overlay { display: none; position: fixed; top: 5%; left: 5%; width: 90%; max-width: 580px; background: #3a1515; border: 2px solid #ff3333; border-radius: 12px; padding: 15px; box-sizing: border-box; z-index: 9999; text-align: left; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-        #error-overlay h3 { margin-top: 0; color: #ff3333; }
-        #error-overlay ol { padding-left: 20px; font-size: 13px; color: #eee; line-height: 1.6; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <div id="loading">正在加载 MOG2 背景减除终极融合引擎...</div>
-
-    <div id="error-overlay">
-        <h3>⚠️ 摄像头访问受限</h3>
-        <p style="font-size:13px; color:#ccc;">请尝试以下步骤恢复摄像头权限：</p>
-        <ol>
-            <li><b>iPhone (Safari)：</b>点击网址栏左侧的 <code>aA</code> 图标 ➔ <b>网站设置</b> ➔ 将摄像头权限改为<b>“允许”</b>，然后刷新。</li>
-            <li><b>Android (Chrome)：</b>点击地址栏左侧的“锁头 🔒”图标 ➔ <b>权限</b> ➔ 开启摄像头，然后刷新。</li>
-            <li><b>微信内置浏览器：</b>点击右上角三个点 <code>···</code> ➔ 选择“在浏览器中打开”再运行。</li>
-        </ol>
-        <button onclick="document.getElementById('error-overlay').style.display='none';" style="width:100%; padding:10px; background:#ff3333; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; margin-top:10px;">我知道了</button>
-    </div>
+    <div id="loading">正在加载高斯背景平均值录制版引擎...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -52,46 +36,26 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(255,51,102,0.3);">启动高斯背景融合实验系统</button>
+        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">启动高斯背景实验系统</button>
         
         <div id="controls" style="display:none;">
             <div id="record-console">
-                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">🔬 MOG2 背景减除 + 黄金时段加速计</div>
+                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">🔬 黄金时段自动去噪加速计</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
-                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 过滤干扰并结算</button>
+                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 过滤异常并结算</button>
                 </div>
-                <div id="avg-display">真实下滑段加速度 a: <span id="avg-val">--</span> m/s²</div>
-                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">设置好划区后，点击开始捕获</div>
+                <div id="avg-display">真实滑行加速度 a: <span id="avg-val">--</span> m/s²</div>
+                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">准备就绪，请点击开始捕获</div>
             </div>
 
-            <div class="grid-sliders">
-                <div class="slider-container">
-                    <label>⬅ 左边界: <span id="valLeft">60</span></label>
-                    <input type="range" id="roiLeft" min="0" max="300" value="60">
-                </div>
-                <div class="slider-container">
-                    <label>➡️ 右边界: <span id="valRight">580</span></label>
-                    <input type="range" id="roiRight" min="340" max="640" value="580">
-                </div>
-                <div class="slider-container">
-                    <label>⬆️ 上边界: <span id="valTop">40</span></label>
-                    <input type="range" id="roiTop" min="0" max="200" value="40">
-                </div>
-                <div class="slider-container">
-                    <label>⬇️ 下边界: <span id="valBottom">440</span></label>
-                    <input type="range" id="roiBottom" min="240" max="480" value="440">
-                </div>
-            </div>
-
-            <div class="slider-container" style="background:#252525; padding:5px; border-radius:8px; margin-bottom: 5px;">
-                <label>背景更新速率: <span id="valLR">0.0000</span></label>
-                <input type="range" id="lrSlider" min="0" max="100" value="0" style="width:70%;">
+            <div class="slider-container" style="background:#1e1e1e; padding:5px; border-radius:8px;">
+                <label>背景更新速率 (Learning Rate): <span id="valLR">0.0000</span></label>
+                <input type="range" id="lrSlider" min="0" max="100" value="0" style="width:90%;">
             </div>
             
-            <div class="data-row">
-                <div class="data-box">实时 a: <span id="accel-val">0.00</span> m/s²</div>
-                <div class="sub-data" style="line-height: 38px;">实时 v: <span id="speed-val">0.00</span> m/s</div>
+            <div style="font-size: 24px; font-weight: bold; color: #ff3366; margin: 10px 0;">
+                实时加速度 a: <span id="accel-val">0.00</span> m/s²
             </div>
 
             <div id="chart-container">
@@ -105,37 +69,29 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const accelVal = document.getElementById('accel-val');
-        const speedVal = document.getElementById('speed-val');
         const startBtn = document.getElementById('startBtn');
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
-        const errorOverlay = document.getElementById('error-overlay');
 
+        // 录制相关控制节点
         const startRecBtn = document.getElementById('startRecBtn');
         const stopRecBtn = document.getElementById('stopRecBtn');
         const avgVal = document.getElementById('avg-val');
         const statusHint = document.getElementById('status-hint');
-
-        const rLeft = document.getElementById('roiLeft'); const rRight = document.getElementById('roiRight');
-        const rTop = document.getElementById('roiTop'); const rBottom = document.getElementById('roiBottom');
         const lrSlider = document.getElementById('lrSlider');
-
-        const vLeft = document.getElementById('valLeft'); const vRight = document.getElementById('valRight');
-        const vTop = document.getElementById('valTop'); const vBottom = document.getElementById('valBottom');
         const vLR = document.getElementById('valLR');
 
         const PX_PER_METER = 3200; 
         let isTracking = false;
-        let learningRate = 0.0000; 
+        let learningRate = 0.0000;
 
         let lastTime = performance.now();
         let lastPos = null;
         let lastVelocity = 0;
-        
         let lastUIUpdateTime = performance.now();
-        let currentRealSpeed = 0;
         let currentRealAccel = 0;
 
+        // 高频数据录制池
         let isRecording = false;
         let recordedAccelData = []; 
 
@@ -144,57 +100,53 @@
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // MOG2 与 图像处理矩阵
-        let src, gray, fgmask, maskROI, bgSubtractor, contours, hierarchy;
+        // 严格使用原高斯代码的核心矩阵
+        let src, gray, fgmask, bgSubtractor, contours, hierarchy;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
             startBtn.style.display = 'inline-block';
         }
 
-        function updateLabels() {
-            vLeft.innerText = rLeft.value; vRight.innerText = rRight.value;
-            vTop.innerText = rTop.value; vBottom.innerText = rBottom.value;
+        lrSlider.addEventListener('input', () => {
             learningRate = parseFloat(lrSlider.value) / 10000;
             vLR.innerText = learningRate.toFixed(4);
-        }
-        [rLeft, rRight, rTop, rBottom, lrSlider].forEach(s => s.addEventListener('input', updateLabels));
+        });
 
-        // 点击捕获
+        // 点击开始捕获
         startRecBtn.addEventListener('click', () => {
             recordedAccelData = []; 
             isRecording = true;
             startRecBtn.style.opacity = "0.4"; startRecBtn.disabled = true;
             stopRecBtn.style.opacity = "1"; stopRecBtn.disabled = false;
-            statusHint.innerText = "🔴 正在通过混合高斯模型捕获动态像素，请释放铝块...";
+            statusHint.innerText = "🔴 正在高频收集滑行裸数据，请释放铝块...";
             avgVal.innerText = "等待滑行结束";
         });
 
-        // 黄金时段自适应过滤结算
+        // 黄金时段自适应结算逻辑
         stopRecBtn.addEventListener('click', () => {
             isRecording = false;
             startRecBtn.style.opacity = "1"; startRecBtn.disabled = false;
             stopRecBtn.style.opacity = "0.4"; stopRecBtn.disabled = true;
 
-            // 过滤无动态的数据
+            // 过滤无动态位移点
             let motionData = recordedAccelData.filter(x => x > 0.1);
 
             if (motionData.length > 15) {
-                // 【掐头】：丢弃前 10 帧释放时产生的机械和人手尖峰抖动
-                let stableSegment = motionData.slice(10); 
-                // 【去尾】：丢弃最后 3 帧撞底触底引起的震荡数据
+                // 【黄金时段截取】
+                let stableSegment = motionData.slice(10); // 掐头：切掉刚放手时人手和按钮带来的尖峰抖动
                 if (stableSegment.length > 5) {
-                    stableSegment = stableSegment.slice(0, -3);
+                    stableSegment = stableSegment.slice(0, -3); // 去尾：切掉滑落到底反弹的异常值
                 }
 
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
 
                 avgVal.innerText = avg.toFixed(2);
-                statusHint.innerText = `🟢 成功! 基于高斯背景模型提取的 ${stableSegment.length} 帧纯下滑数据结算。`;
+                statusHint.innerText = `🟢 成功! 基于 MOG2 提取的 ${stableSegment.length} 帧平稳数据结算。`;
             } else {
                 avgVal.innerText = "--";
-                statusHint.innerText = "❌ 未捕获到稳定且持续的下滑动态过程。";
+                statusHint.innerText = "❌ 录制时间太短或未捕捉到有效位移数据。";
             }
         });
 
@@ -205,7 +157,7 @@
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: 'MOG2 瞬时加速度 (m/s²)',
+                        label: '瞬时加速度 (m/s²)',
                         data: chartData,
                         borderColor: '#ff3366',
                         borderWidth: 2,
@@ -219,7 +171,7 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        y: { min: 0, max: 25, grid: { color: '#2a2a2a' }, ticks: { color: '#888' } },
+                        y: { min: 0, max: 25, grid: { color: '#333' }, ticks: { color: '#aaa' } },
                         x: { display: false }
                     },
                     plugins: { legend: { display: false } }
@@ -227,16 +179,16 @@
             });
         }
 
+        // 🌟 100% 还原你之前能正常调起摄像头的原装按钮启动逻辑
         startBtn.addEventListener('click', async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 240 } },
+                    video: { facingMode: "environment" },
                     audio: false
                 });
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 controls.style.display = 'block';
-                updateLabels();
                 initChart(); 
 
                 video.onloadedmetadata = () => {
@@ -246,11 +198,10 @@
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
                     gray = new cv.Mat();
                     fgmask = new cv.Mat();
-                    maskROI = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC1);
                     contours = new cv.MatVector();
                     hierarchy = new cv.Mat();
 
-                    // 初始化混合高斯背景模型
+                    // 使用之前能跑的高斯差分检测器
                     bgSubtractor = new cv.BackgroundSubtractorMOG2(500, 16, false);
 
                     isTracking = true;
@@ -258,45 +209,22 @@
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
-                console.error(err);
-                errorOverlay.style.display = "block";
+                alert("摄像头启动失败: " + err.message);
             }
         });
 
         function trackLoop() {
             if (!isTracking) return;
 
+            // 还原原来的黑白高斯图像直接渲染模式，保证绝对不产生内存黑屏冲突
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            let xMin = parseInt(rLeft.value); let xMax = parseInt(rRight.value);
-            let yMin = parseInt(rTop.value);  let yMax = parseInt(rBottom.value);
-
-            // 绘制指定的黄色电子栅栏限区
-            ctx.strokeStyle = '#ffcc00';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([6, 4]);
-            ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
-            ctx.setLineDash([]); 
-
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
-            // 1. 高斯模型背景剥离计算
             bgSubtractor.apply(gray, fgmask, learningRate);
 
-            // 2. 构建封闭区域电子围栏
-            maskROI.setTo(new cv.Scalar(0)); 
-            let rectROI = new cv.Rect(xMin, yMin, xMax - xMin, yMax - yMin);
-            let roiRegion = maskROI.roi(rectROI);
-            roiRegion.setTo(new cv.Scalar(255)); 
-            roiRegion.delete(); 
-
-            // 3. 将背景剥离结果与限区矩阵求交集 —— 框外干扰全部强制归零抹黑！
-            cv.bitwise_and(fgmask, maskROI, fgmask);
-
-            // 4. 提取运动残影轮廓
+            // 寻找轮廓
             cv.findContours(fgmask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
             let bestCenter = null;
@@ -305,7 +233,7 @@
             for (let i = 0; i < contours.size(); ++i) {
                 let cnt = contours.get(i);
                 let area = cv.contourArea(cnt);
-                if (area > 40 && area < 20000) {
+                if (area > 50 && area < 20000) {
                     if (area > maxArea) {
                         maxArea = area;
                         let M = cv.moments(cnt, false);
@@ -316,10 +244,14 @@
                 }
             }
 
+            // 将高斯处理后的黑白动态结果输出到屏幕上（原汁原味）
+            cv.imshow('canvas', fgmask);
+
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
             if (bestCenter && dt > 0) {
+                // 在黑白二值图上画出粉色跟踪靶心
                 ctx.beginPath();
                 ctx.arc(bestCenter.x, bestCenter.y, 16, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#ff3366';
@@ -331,33 +263,33 @@
                     const dy = bestCenter.y - lastPos.y;
                     const distancePx = Math.sqrt(dx * dx + dy * dy);
 
-                    currentRealSpeed = distancePx / PX_PER_METER / dt;
+                    let currentRealSpeed = distancePx / PX_PER_METER / dt;
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
                     if (rawAccel > 100.0) rawAccel = 0.0;
-
                     currentRealAccel = rawAccel;
+                    
+                    // ⏱️ 核心灌入：点击捕获后，在后台把纯净的高斯运动像素所产生的加速度塞进数组
                     if (isRecording) {
                         recordedAccelData.push(currentRealAccel);
                     }
+
                     lastVelocity = currentRealSpeed;
                 }
                 lastPos = { x: bestCenter.x, y: bestCenter.y };
             } else {
-                currentRealSpeed = 0;
                 currentRealAccel = 0;
                 lastVelocity = 0;
                 lastPos = null;
             }
 
-            // 阻尼显示：数字每 250 毫秒平稳刷新一次
+            // 250ms 阻尼刷新数字
             if (currentTime - lastUIUpdateTime >= 250) {
-                speedVal.innerText = currentRealSpeed.toFixed(2);
                 accelVal.innerText = currentRealAccel.toFixed(2);
                 lastUIUpdateTime = currentTime;
             }
 
-            // 原始波形图表实时高灵敏同步
+            // 图表更新
             if (currentTime - lastChartUpdateTime >= 50) {
                 chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
                 chartData.shift(); 
