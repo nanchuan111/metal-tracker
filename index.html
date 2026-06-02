@@ -3,46 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>模板快照锁定追踪器 v9.0</title>
+    <title>斜坡定制：蓝色滑道缺陷追踪器 v10.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #ffcc00; overflow-y: auto; }
+        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #3399ff; overflow-y: auto; }
         .data-row { display: flex; justify-content: space-around; margin: 5px 0; align-items: center; }
-        .data-box { font-size: 24px; font-weight: bold; color: #ffcc00; }
+        .data-box { font-size: 24px; font-weight: bold; color: #3399ff; }
         .sub-data { font-size: 16px; color: #aaa; }
-        button { padding: 12px 25px; font-size: 16px; background: #ffcc00; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
+        button { padding: 10px 20px; font-size: 16px; background: #3399ff; color: #fff; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
+        .slider-container { margin: 5px auto; width: 90%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+        input[type=range] { width: 60%; }
         #chart-container { width: 95%; max-width: 600px; height: 180px; margin: 10px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-        .engine-tag { font-size: 12px; color: #000; background: #ffcc00; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
-        #guide-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 60px; height: 60px; border: 2px dashed #ffcc00; box-sizing: border-box; pointer-events: none; display: none; }
+        .engine-tag { font-size: 12px; color: #fff; background: #3399ff; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <div id="loading">正在加载全新模板匹配引擎，请稍候...</div>
+    <div id="loading">正在加载斜坡定制版视觉引擎，请稍候...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas"></canvas>
-        <div id="guide-overlay"></div>
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none;">启动相机并对准</button>
-        <button id="lockBtn" style="display:none; background: #00ffff; color: #000;">对准方块：点击锁定特征并追踪</button>
-        
+        <button id="startBtn" style="display:none;">开启滑道色块差分追踪</button>
         <div id="controls" style="display:none;">
+            <div class="slider-container">
+                <label>蓝色识别宽容度:</label>
+                <input type="range" id="thresholdSlider" min="15" max="60" value="30">
+                <span id="sliderVal">30</span>
+            </div>
+            
             <div class="data-row">
                 <div class="data-box">加速度: <span id="accel-val">0.00</span> m/s²</div>
                 <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
             </div>
             <div class="data-row" style="margin-top: -5px;">
-                <span class="engine-tag">首帧快照滑窗卷积匹配机制已启用</span>
-                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">无视图像破损 | 240FPS自适应裸数据</span>
+                <span class="engine-tag">逆向追踪：滑道覆盖异物检测模式</span>
+                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">240FPS自适应裸数据直出</span>
             </div>
 
             <div id="chart-container">
@@ -58,16 +62,16 @@
         const accelVal = document.getElementById('accel-val');
         const speedVal = document.getElementById('speed-val');
         const startBtn = document.getElementById('startBtn');
-        const lockBtn = document.getElementById('lockBtn');
+        const thresholdSlider = document.getElementById('thresholdSlider');
+        const sliderVal = document.getElementById('sliderVal');
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
-        const guideOverlay = document.getElementById('guide-overlay');
 
+        // 由于斜坡存在透视畸变，这里作为相对像素物理位移估算，维持原标定
         const PX_PER_METER = 3200; 
-        const TEMPLATE_SIZE = 60; // 匹配方块区域大小（像素）
         
         let isTracking = false;
-        let isTemplateInitialized = false;
+        let blueTolerance = 30; // 蓝色H通道的过滤宽容度
 
         let lastTime = performance.now();
         let lastPos = null;
@@ -80,8 +84,9 @@
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // OpenCV 核心矩阵变量
-        let src, gray, template, result;
+        // OpenCV 核心组件
+        let src, hsv, blueMask, inverseMask, labels, stats, centroids;
+        let lowBlue, highBlue;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
@@ -95,13 +100,13 @@
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: '裸数据加速度 (m/s²)',
+                        label: '覆盖物移动加速度 (m/s²)',
                         data: chartData,
-                        borderColor: '#ffcc00',
+                        borderColor: '#3399ff',
                         borderWidth: 2,
                         pointRadius: 1, 
                         fill: true,
-                        backgroundColor: 'rgba(255, 204, 0, 0.04)',
+                        backgroundColor: 'rgba(51, 153, 255, 0.04)',
                         tension: 0 
                     }]
                 },
@@ -117,6 +122,11 @@
             });
         }
 
+        thresholdSlider.addEventListener('input', (e) => {
+            blueTolerance = parseInt(e.target.value);
+            sliderVal.innerText = blueTolerance;
+        });
+
         startBtn.addEventListener('click', async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
@@ -125,99 +135,101 @@
                 });
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
-                lockBtn.style.display = 'inline-block';
-                guideOverlay.style.display = 'block'; // 显示屏幕中央引导虚线框
+                controls.style.display = 'block';
+                initChart(); 
 
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
-                    gray = new cv.Mat();
-                    template = new cv.Mat();
-                    result = new cv.Mat();
+                    hsv = new cv.Mat();
+                    blueMask = new cv.Mat();
+                    inverseMask = new cv.Mat();
+                    labels = new cv.Mat();
+                    stats = new cv.Mat();
+                    centroids = new cv.Mat();
                     
+                    lowBlue = new cv.Mat(1, 3, cv.CV_8UC1);
+                    highBlue = new cv.Mat(1, 3, cv.CV_8UC1);
+
                     isTracking = true;
-                    requestAnimationFrame(preTrackLoop);
+                    lastTime = performance.now();
+                    requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
-                alert("相机权限获取失败: " + err.message);
+                alert("相机初始化失败: " + err.message);
             }
         });
 
-        // 在未锁定特征前，仅仅做画面预览投喂，并绘制引导框
-        function preTrackLoop() {
-            if (isTemplateInitialized || !isTracking) return;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            requestAnimationFrame(preTrackLoop);
-        }
-
-        // 按钮触发核心：截取正中心的正方形图像作为工业硬模板
-        lockBtn.addEventListener('click', () => {
-            // 计算屏幕正中心的 ROI（感兴趣区域）坐标
-            let startX = Math.floor((canvas.width - TEMPLATE_SIZE) / 2);
-            let startY = Math.floor((canvas.height - TEMPLATE_SIZE) / 2);
-
-            // 读取当前帧灰度图
-            let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            src.data.set(imageData.data);
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
-            // 截取核心方块特征矩形
-            let rect = new cv.Rect(startX, startY, TEMPLATE_SIZE, TEMPLATE_SIZE);
-            template = gray.roi(rect).clone(); // 克隆为标准模板
-
-            guideOverlay.style.display = 'none';
-            lockBtn.style.display = 'none';
-            controls.style.display = 'block';
-            initChart();
-
-            isTemplateInitialized = true;
-            lastTime = performance.now();
-            requestAnimationFrame(trackLoop);
-        });
-
         function trackLoop() {
-            if (!isTracking || !isTemplateInitialized) return;
+            if (!isTracking) return;
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
-            // 1. 全图转为灰度基准图
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            // 1. 转到 HSV 色彩空间精准看颜色
+            cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+            cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
 
-            // 2. 核心大招：执行滑窗模板匹配 (使用归一化相关系数匹配法，抗光影极强)
-            cv.matchTemplate(gray, template, result, cv.TM_CCOEFF_NORMED);
+            // 2. 牢牢锁定滑道的亮蓝色区间（标准蓝色 H 约为 100-125 附近）
+            // 根据调节的宽容度，抓取纯蓝色大滑道
+            lowBlue.data[0] = 100 - blueTolerance;  lowBlue.data[1] = 60;  lowBlue.data[2] = 50;
+            highBlue.data[0] = 115 + blueTolerance; highBlue.data[1] = 255; highBlue.data[2] = 255;
+            cv.inRange(hsv, lowBlue, highBlue, blueMask);
 
-            // 3. 找出重合度最高（最像方块）的那个点的位置坐标
-            let minMax = cv.minMaxLoc(result);
-            let maxLoc = minMax.maxLoc; // 匹配度最高的左上角点
+            // 3. 【黑科技核心】：取反！提取出蓝色滑道中“被方块吃掉、遮挡的不蓝区域”
+            cv.bitwise_not(blueMask, inverseMask);
 
-            // 4. 计算当前方块在画面中的中心点坐标
-            let bestCenter = {
-                x: maxLoc.x + TEMPLATE_SIZE / 2,
-                y: maxLoc.y + TEMPLATE_SIZE / 2
-            };
+            // 4. 对被遮挡的异物碎块进行连通域质心分析
+            let numLabels = cv.connectedComponentsWithStats(inverseMask, labels, stats, centroids);
+
+            let bestCenter = null;
+            let maxArea = 0;
+
+            for (let i = 1; i < numLabels; i++) {
+                let area = stats.getIntAt(i, cv.CC_STAT_AREA);
+                
+                // 限制在滑道中移动的异物像素面积合理区间
+                if (area > 150 && area < 10000) {
+                    
+                    // 过滤掉整个屏幕中除了滑道外大面积的黑背景（背景面积往往极大）
+                    // 真正方块在斜坡上遮挡出的无蓝区，其宽和高应该在合理比例范围内
+                    let left = stats.getIntAt(i, cv.CC_STAT_LEFT);
+                    let top = stats.getIntAt(i, cv.CC_STAT_TOP);
+                    let width = stats.getIntAt(i, cv.CC_STAT_WIDTH);
+                    let height = stats.getIntAt(i, cv.CC_STAT_HEIGHT);
+
+                    // 避免捕获全屏两侧的无关黑色边缘
+                    if (left > 10 && (left + width) < (canvas.width - 10)) {
+                        if (area > maxArea) {
+                            maxArea = area;
+                            bestCenter = {
+                                x: centroids.getDoubleAt(i, 0),
+                                y: centroids.getDoubleAt(i, 1)
+                            };
+                        }
+                    }
+                }
+            }
 
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
-            // 无任何形状干扰卡锁，直接输出纯净位置漂移
+            // 无阻碍直接结算位移
             if (bestCenter && dt > 0) {
-                // 绘制金黄色工业级锁定十字线与核心靶圈
+                // 绘制锁定遮挡物特征环
                 ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 20, 0, 2 * Math.PI);
-                ctx.strokeStyle = '#ffcc00';
+                ctx.arc(bestCenter.x, bestCenter.y, 18, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#3399ff';
                 ctx.lineWidth = 3;
                 ctx.stroke();
 
+                ctx.fillStyle = '#3399ff';
                 ctx.beginPath();
-                ctx.moveTo(bestCenter.x - 30, bestCenter.y); ctx.lineTo(bestCenter.x + 30, bestCenter.y);
-                ctx.moveTo(bestCenter.x, bestCenter.y - 30); ctx.lineTo(bestCenter.x, bestCenter.y + 30);
-                ctx.strokeStyle = '#ffcc00';
-                ctx.lineWidth = 1;
-                ctx.stroke();
+                ctx.arc(bestCenter.x, bestCenter.y, 4, 0, 2 * Math.PI);
+                ctx.fill();
 
                 if (lastPos) {
                     const dx = bestCenter.x - lastPos.x;
@@ -233,13 +245,16 @@
                     lastVelocity = currentRealSpeed;
                 }
                 lastPos = { x: bestCenter.x, y: bestCenter.y };
+            } else {
+                currentRealSpeed = 0;
+                currentRealAccel = 0;
+                lastVelocity = 0;
+                lastPos = null;
             }
 
-            // 数据直出 UI
             speedVal.innerText = currentRealSpeed.toFixed(2);
             accelVal.innerText = currentRealAccel.toFixed(2);
 
-            // 图表更新
             if (currentTime - lastChartUpdateTime >= 50) {
                 chartData.push(parseFloat(currentRealAccel.toFixed(2))); 
                 chartData.shift(); 
