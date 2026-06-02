@@ -3,50 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>实物特制：高对比度方块追踪器 v8.0</title>
+    <title>模板快照锁定追踪器 v9.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 40vh; max-width: 640px; margin: 0 auto; background: #000; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #ff00ff; overflow-y: auto; }
+        #dashboard { height: 60vh; padding: 10px; box-sizing: border-box; background: #2a2a2a; border-top: 3px solid #ffcc00; overflow-y: auto; }
         .data-row { display: flex; justify-content: space-around; margin: 5px 0; align-items: center; }
-        .data-box { font-size: 24px; font-weight: bold; color: #ff00ff; }
+        .data-box { font-size: 24px; font-weight: bold; color: #ffcc00; }
         .sub-data { font-size: 16px; color: #aaa; }
-        button { padding: 10px 20px; font-size: 16px; background: #ff00ff; color: #fff; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
-        .slider-container { margin: 5px auto; width: 90%; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
-        input[type=range] { width: 60%; }
+        button { padding: 12px 25px; font-size: 16px; background: #ffcc00; color: #000; font-weight: bold; border: none; border-radius: 25px; cursor: pointer; margin: 5px; }
         #chart-container { width: 95%; max-width: 600px; height: 180px; margin: 10px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
-        .engine-tag { font-size: 12px; color: #fff; background: #ff00ff; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
+        .engine-tag { font-size: 12px; color: #000; background: #ffcc00; padding: 2px 6px; border-radius: 4px; margin-left: 5px; vertical-align: middle; font-weight: bold; }
+        #guide-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 60px; height: 60px; border: 2px dashed #ffcc00; box-sizing: border-box; pointer-events: none; display: none; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <div id="loading">正在加载实物定制版视觉引擎，请稍候...</div>
+    <div id="loading">正在加载全新模板匹配引擎，请稍候...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas"></canvas>
+        <div id="guide-overlay"></div>
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none;">开启实物专属追踪</button>
+        <button id="startBtn" style="display:none;">启动相机并对准</button>
+        <button id="lockBtn" style="display:none; background: #00ffff; color: #000;">对准方块：点击锁定特征并追踪</button>
+        
         <div id="controls" style="display:none;">
-            <div class="slider-container">
-                <label>黑白切分门限 (Gray):</label>
-                <input type="range" id="thresholdSlider" min="15" max="150" value="55">
-                <span id="sliderVal">55</span>
-            </div>
-            
             <div class="data-row">
                 <div class="data-box">加速度: <span id="accel-val">0.00</span> m/s²</div>
                 <div class="sub-data" style="line-height: 35px;">速度: <span id="speed-val">0.00</span> m/s</div>
             </div>
             <div class="data-row" style="margin-top: -5px;">
-                <span class="engine-tag">大核抗噪 + 宽高比例锁定锁定中</span>
-                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">物理校准: 20cm | 240FPS自适应</span>
+                <span class="engine-tag">首帧快照滑窗卷积匹配机制已启用</span>
+                <span class="sub-data" style="color: #ffcc00; font-weight: bold;">无视图像破损 | 240FPS自适应裸数据</span>
             </div>
 
             <div id="chart-container">
@@ -62,16 +58,16 @@
         const accelVal = document.getElementById('accel-val');
         const speedVal = document.getElementById('speed-val');
         const startBtn = document.getElementById('startBtn');
-        const thresholdSlider = document.getElementById('thresholdSlider');
-        const sliderVal = document.getElementById('sliderVal');
+        const lockBtn = document.getElementById('lockBtn');
         const controls = document.getElementById('controls');
         const loadingText = document.getElementById('loading');
+        const guideOverlay = document.getElementById('guide-overlay');
 
-        // 20cm 距离物理校准
         const PX_PER_METER = 3200; 
+        const TEMPLATE_SIZE = 60; // 匹配方块区域大小（像素）
         
         let isTracking = false;
-        let grayThreshold = 55; 
+        let isTemplateInitialized = false;
 
         let lastTime = performance.now();
         let lastPos = null;
@@ -79,14 +75,13 @@
         let currentRealSpeed = 0;
         let currentRealAccel = 0;
 
-        // 图表控制
         let chartInstance;
         let chartLabels = Array(40).fill(''); 
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // OpenCV 内存
-        let src, gray, blurred, binary, contours, hierarchy;
+        // OpenCV 核心矩阵变量
+        let src, gray, template, result;
 
         function onOpenCvReady() {
             loadingText.style.display = 'none';
@@ -100,13 +95,13 @@
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: '实时裸数据加速度 (m/s²)',
+                        label: '裸数据加速度 (m/s²)',
                         data: chartData,
-                        borderColor: '#ff00ff',
+                        borderColor: '#ffcc00',
                         borderWidth: 2,
                         pointRadius: 1, 
                         fill: true,
-                        backgroundColor: 'rgba(255, 0, 255, 0.04)',
+                        backgroundColor: 'rgba(255, 204, 0, 0.04)',
                         tension: 0 
                     }]
                 },
@@ -114,23 +109,13 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        y: {
-                            min: 0,
-                            max: 25, 
-                            grid: { color: '#333' },
-                            ticks: { color: '#aaa' }
-                        },
+                        y: { min: 0, max: 25, grid: { color: '#333' }, ticks: { color: '#aaa' } },
                         x: { display: false }
                     },
                     plugins: { legend: { display: false } }
                 }
             });
         }
-
-        thresholdSlider.addEventListener('input', (e) => {
-            grayThreshold = parseInt(e.target.value);
-            sliderVal.innerText = grayThreshold;
-        });
 
         startBtn.addEventListener('click', async () => {
             try {
@@ -140,8 +125,8 @@
                 });
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
-                controls.style.display = 'block';
-                initChart(); 
+                lockBtn.style.display = 'inline-block';
+                guideOverlay.style.display = 'block'; // 显示屏幕中央引导虚线框
 
                 video.onloadedmetadata = () => {
                     canvas.width = video.videoWidth;
@@ -149,82 +134,90 @@
                     
                     src = new cv.Mat(canvas.height, canvas.width, cv.CV_8UC4);
                     gray = new cv.Mat();
-                    blurred = new cv.Mat();
-                    binary = new cv.Mat();
-                    contours = new cv.MatVector();
-                    hierarchy = new cv.Mat();
-
+                    template = new cv.Mat();
+                    result = new cv.Mat();
+                    
                     isTracking = true;
-                    lastTime = performance.now();
-                    requestAnimationFrame(trackLoop);
+                    requestAnimationFrame(preTrackLoop);
                 };
             } catch (err) {
-                alert("相机权限申请失败: " + err.message);
+                alert("相机权限获取失败: " + err.message);
             }
         });
 
+        // 在未锁定特征前，仅仅做画面预览投喂，并绘制引导框
+        function preTrackLoop() {
+            if (isTemplateInitialized || !isTracking) return;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            requestAnimationFrame(preTrackLoop);
+        }
+
+        // 按钮触发核心：截取正中心的正方形图像作为工业硬模板
+        lockBtn.addEventListener('click', () => {
+            // 计算屏幕正中心的 ROI（感兴趣区域）坐标
+            let startX = Math.floor((canvas.width - TEMPLATE_SIZE) / 2);
+            let startY = Math.floor((canvas.height - TEMPLATE_SIZE) / 2);
+
+            // 读取当前帧灰度图
+            let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            src.data.set(imageData.data);
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+            // 截取核心方块特征矩形
+            let rect = new cv.Rect(startX, startY, TEMPLATE_SIZE, TEMPLATE_SIZE);
+            template = gray.roi(rect).clone(); // 克隆为标准模板
+
+            guideOverlay.style.display = 'none';
+            lockBtn.style.display = 'none';
+            controls.style.display = 'block';
+            initChart();
+
+            isTemplateInitialized = true;
+            lastTime = performance.now();
+            requestAnimationFrame(trackLoop);
+        });
+
         function trackLoop() {
-            if (!isTracking) return;
+            if (!isTracking || !isTemplateInitialized) return;
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             src.data.set(imageData.data);
 
-            // 1. 灰度化
+            // 1. 全图转为灰度基准图
             cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-            // 2. 强力大核滤波：直接粉碎桌面上的白色划痕、灰尘噪点
-            cv.GaussianBlur(gray, blurred, new cv.Size(9, 9), 0, 0, cv.BORDER_DEFAULT);
+            // 2. 核心大招：执行滑窗模板匹配 (使用归一化相关系数匹配法，抗光影极强)
+            cv.matchTemplate(gray, template, result, cv.TM_CCOEFF_NORMED);
 
-            // 3. 门限二值化（将灰色铝块和黑桌面彻底一刀切）
-            cv.threshold(blurred, binary, grayThreshold, 255, cv.THRESH_BINARY);
+            // 3. 找出重合度最高（最像方块）的那个点的位置坐标
+            let minMax = cv.minMaxLoc(result);
+            let maxLoc = minMax.maxLoc; // 匹配度最高的左上角点
 
-            // 4. 提取外部轮廓
-            cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-            let bestCenter = null;
-            let maxArea = 0;
-
-            for (let i = 0; i < contours.size(); ++i) {
-                let cnt = contours.get(i);
-                let area = cv.contourArea(cnt);
-                
-                // 面积精细初筛：针对20cm铝块大小范围
-                if (area > 200 && area < 8000) {
-                    
-                    // 【本版核心逻辑：引入物理宽高比过滤】
-                    let rect = cv.boundingRect(cnt);
-                    let aspectRatio = rect.width / rect.height;
-                    
-                    // 照片中的铝块由于视角原因，比例在1附近。卡住 0.7 到 1.45，排除掉非正方形的线状杂质和影子
-                    if (aspectRatio > 0.70 && aspectRatio < 1.45) {
-                        if (area > maxArea) {
-                            maxArea = area;
-                            let M = cv.moments(cnt, false);
-                            if (M.m00 !== 0) {
-                                bestCenter = { x: M.m10 / M.m00, y: M.m01 / M.m00 };
-                            }
-                        }
-                    }
-                }
-            }
+            // 4. 计算当前方块在画面中的中心点坐标
+            let bestCenter = {
+                x: maxLoc.x + TEMPLATE_SIZE / 2,
+                y: maxLoc.y + TEMPLATE_SIZE / 2
+            };
 
             const currentTime = performance.now();
             const dt = (currentTime - lastTime) / 1000;
 
-            // 240FPS自适应结算
+            // 无任何形状干扰卡锁，直接输出纯净位置漂移
             if (bestCenter && dt > 0) {
-                // 绘制紫色高精度质心瞄准靶
+                // 绘制金黄色工业级锁定十字线与核心靶圈
                 ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 16, 0, 2 * Math.PI);
-                ctx.strokeStyle = '#ff00ff';
+                ctx.arc(bestCenter.x, bestCenter.y, 20, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#ffcc00';
                 ctx.lineWidth = 3;
                 ctx.stroke();
 
-                ctx.fillStyle = '#ff00ff';
                 ctx.beginPath();
-                ctx.arc(bestCenter.x, bestCenter.y, 4, 0, 2 * Math.PI);
-                ctx.fill();
+                ctx.moveTo(bestCenter.x - 30, bestCenter.y); ctx.lineTo(bestCenter.x + 30, bestCenter.y);
+                ctx.moveTo(bestCenter.x, bestCenter.y - 30); ctx.lineTo(bestCenter.x, bestCenter.y + 30);
+                ctx.strokeStyle = '#ffcc00';
+                ctx.lineWidth = 1;
+                ctx.stroke();
 
                 if (lastPos) {
                     const dx = bestCenter.x - lastPos.x;
@@ -234,21 +227,15 @@
                     currentRealSpeed = distancePx / PX_PER_METER / dt;
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
-                    // 底层100熔断保护
                     if (rawAccel > 100.0) rawAccel = 0.0;
 
                     currentRealAccel = rawAccel;
                     lastVelocity = currentRealSpeed;
                 }
                 lastPos = { x: bestCenter.x, y: bestCenter.y };
-            } else {
-                currentRealSpeed = 0;
-                currentRealAccel = 0;
-                lastVelocity = 0;
-                lastPos = null;
             }
 
-            // 输出到 UI
+            // 数据直出 UI
             speedVal.innerText = currentRealSpeed.toFixed(2);
             accelVal.innerText = currentRealAccel.toFixed(2);
 
