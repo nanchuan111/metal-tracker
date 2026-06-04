@@ -48,11 +48,11 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">原神启动</button>
+        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">启动锁定45帧实验系统</button>
         
         <div id="controls" style="display:none;">
             <div id="record-console">
-                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">⚡ 相机工作帧率: <span id="fps-display">--</span> FPS | 标定长: 30cm</div>
+                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">⚡ 相机锁定帧率: <span id="fps-display">--</span> / 45 FPS | 标定长: 30cm</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
                     <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 智能检索并结算</button>
@@ -91,7 +91,7 @@
             </div>
             
             <div style="font-size: 20px; font-weight: bold; color: #ff3366; margin: 6px 0; background: #222; padding: 4px; border-radius: 5px;">
-                瞬时a: <span id="accel-val">0.00</span> m/s²
+                瞬时全速 a: <span id="accel-val">0.00</span> m/s²
             </div>
 
             <div id="chart-container">
@@ -144,6 +144,10 @@
 
         let fpsFrameCount = 0;
         let fpsLastTime = performance.now();
+
+        // ⏱️ 锁45帧机制核心：1000ms / 45帧 = 22.22ms 最小间隔
+        const FRAME_INTERVAL = 1000 / 45;
+        let lastFrameRenderTime = performance.now();
 
         let src, gray, fgmask, bgSubtractor, contours, hierarchy;
 
@@ -200,7 +204,6 @@
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
                 
-                // 核心修复位置 1：明确赋值单次平均显示，防止被后面覆盖
                 avgVal.innerText = avg.toFixed(2);
                 
                 let formattedRawData = stableSegment.map(v => v.toFixed(2)).join(", ");
@@ -212,14 +215,13 @@
                     avgValue: avg
                 });
 
-                renderTable(false); // 传入 false 表示不需要把控制台显示清成 "--"
+                renderTable(false); 
 
             } else {
                 avgVal.innerText = "--";
             }
         });
 
-        // 📊 渲染表格逻辑
         function renderTable(resetCurrentDisplay = true) {
             if (experimentList.length === 0) {
                 tableBody.innerHTML = `<tr><td colspan="4" style="color: #666; padding: 15px;">暂无实验数据，等待放手下滑结算...</td></tr>`;
@@ -250,19 +252,16 @@
             let globalAvg = globalSum / experimentList.length;
             globalAvgVal.innerText = globalAvg.toFixed(2);
             
-            // 核心修复位置 2：如果仅仅是删除了某一项，把当前单次值清空，防止数据错乱
             if (resetCurrentDisplay) {
                 avgVal.innerText = "--";
             }
         }
 
-        // 🧼 独立单项删除
         window.deleteItem = function(id) {
             experimentList = experimentList.filter(item => item.id !== id);
-            renderTable(true); // 删除单项时重置当前单次框为 "--"
+            renderTable(true); 
         };
 
-        // 一键清空
         clearBtn.addEventListener('click', () => {
             experimentList = [];
             renderTable(true);
@@ -299,12 +298,13 @@
 
         startBtn.addEventListener('click', async () => {
             try {
+                // 🔒 1. 硬件层限制：请求相机的理想和最大帧率均为 45 帧
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         facingMode: "environment",
                         width: { ideal: 640 },  
                         height: { ideal: 480 },
-                        frameRate: { min: 60, ideal: 240 }
+                        frameRate: { ideal: 45, max: 45 }
                     },
                     audio: false
                 });
@@ -329,6 +329,7 @@
                     isTracking = true;
                     lastTime = performance.now();
                     fpsLastTime = performance.now();
+                    lastFrameRenderTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
@@ -343,12 +344,24 @@
         function trackLoop() {
             if (!isTracking) return;
 
+            // 🔒 2. 软件算法节流拦截：若当前刷新间隔小于目标 22.22ms，则放弃本帧执行，等待下一次循环
+            const currentTime = performance.now();
+            const elapsed = currentTime - lastFrameRenderTime;
+
+            if (elapsed < FRAME_INTERVAL) {
+                requestAnimationFrame(trackLoop);
+                return;
+            }
+
+            // 更新上一次成功渲染的时间基准线并吸收尾数微小偏差
+            lastFrameRenderTime = currentTime - (elapsed % FRAME_INTERVAL);
+
+            // FPS 指数计算与刷新
             fpsFrameCount++;
-            const nowTime = performance.now();
-            if (nowTime - fpsLastTime >= 1000) {
+            if (currentTime - fpsLastTime >= 1000) {
                 fpsDisplay.innerText = fpsFrameCount;
                 fpsFrameCount = 0;
-                fpsLastTime = nowTime;
+                fpsLastTime = currentTime;
             }
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -379,7 +392,6 @@
 
             cv.imshow('canvas', fgmask);
 
-            const currentTime = performance.now();
             const realDt = (currentTime - lastTime) / 1000;
 
             if (bestCenter && realDt > 0) {
