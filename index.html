@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>物理实验：最高帧率全开结算系统 v24.0</title>
+    <title>物理实验：30cm多轮表格统计结算系统 v26.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 35vh; max-width: 640px; margin: 0 auto; background: #000; }
@@ -15,11 +15,22 @@
         .btn-action { padding: 10px 18px; font-size: 14px; font-weight: bold; border: none; border-radius: 20px; cursor: pointer; }
         #startRecBtn { background: #ff3366; color: #fff; }
         #stopRecBtn { background: #ffaa00; color: #000; }
-        #avg-display { font-size: 22px; color: #00f0ff; margin-top: 6px; font-weight: bold; background: #111; padding: 8px; border-radius: 6px; border: 1px solid #00f0ff; }
+        
+        #avg-display { font-size: 20px; color: #00f0ff; margin-top: 6px; font-weight: bold; background: #111; padding: 6px; border-radius: 6px; border: 1px solid #00f0ff; }
+        #global-avg-display { font-size: 22px; color: #00ff66; margin-top: 4px; font-weight: bold; background: #111; padding: 6px; border-radius: 6px; border: 1px solid #00ff66; }
+
+        /* 📊 物理实验统计表格样式 */
+        #table-panel { background: #1e1e1e; padding: 10px; border-radius: 8px; margin-top: 10px; border: 1px solid #444; text-align: left; }
+        .table-wrapper { width: 100%; overflow-x: auto; margin-top: 6px; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; background: #111; font-size: 12px; color: #ccc; min-width: 450px; }
+        th, td { padding: 8px; border: 1px solid #333; text-align: center; }
+        th { background: #252525; color: #ffaa00; }
+        tr:nth-child(even) { background: #181818; }
+        .td-raw { text-align: left; font-family: monospace; font-size: 11px; color: #00ff66; word-break: break-all; max-width: 220px; }
 
         .slider-container { display: flex; flex-direction: column; align-items: center; font-size: 12px; color: #ccc; margin: 6px 0; }
         input[type=range] { width: 85%; margin-top: 2px; }
-        #chart-container { width: 95%; max-width: 600px; height: 120px; margin: 5px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
+        #chart-container { width: 95%; max-width: 600px; height: 105px; margin: 5px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
@@ -27,7 +38,7 @@
 </head>
 <body>
 
-    <div id="loading">正在加载最高帧率全开结算引擎...</div>
+    <div id="loading">正在加载多轮表格自动统计结算引擎...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -39,21 +50,44 @@
         
         <div id="controls" style="display:none;">
             <div id="record-console">
-                <div style="font-size: 13px; color: #00ff66; font-weight: bold;">⚡ 相机当前工作帧率: <span id="fps-display">--</span> FPS</div>
+                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">⚡ 相机工作帧率: <span id="fps-display">--</span> FPS | 标定长: 30cm</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
                     <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 智能检索并结算</button>
                 </div>
-                <div id="avg-display">📊 黄金滑行段平均 a: <span id="avg-val">--</span> m/s²</div>
-                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">采用硬件最高帧率流输入</div>
+                <div id="avg-display">📊 当前单次滑行平均 a: <span id="avg-val">--</span> m/s²</div>
+                <div id="global-avg-display">🎯 历史累计所有实验总平均 a: <span id="global-avg-val">--</span> m/s²</div>
             </div>
 
-            <div class="slider-container" style="background:#1e1e1e; padding:5px; border-radius:8px;">
+            <div id="table-panel">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size: 13px; color: #ffaa00; font-weight: bold;">📋 物理实验多轮数据统计表</span>
+                    <button id="clearBtn" style="padding: 2px 8px; font-size: 11px; background: #444; color: #ff3366; border: 1px solid #555; border-radius: 4px; cursor: pointer;">清空表格</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 15%;">序号</th>
+                                <th style="width: 55%;">本轮黄金下滑段所有 a 存储点 (m/s²)</th>
+                                <th style="width: 30%;">本轮平均 a</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body">
+                            <tr>
+                                <td colspan="3" style="color: #666; padding: 15px;">暂无实验数据，等待放手下滑结算...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="slider-container" style="background:#1e1e1e; padding:5px; border-radius:8px; margin-top:8px;">
                 <label>背景更新速率 (Learning Rate): <span id="valLR">0.0000</span></label>
                 <input type="range" id="lrSlider" min="0" max="100" value="0" style="width:90%;">
             </div>
             
-            <div style="font-size: 24px; font-weight: bold; color: #ff3366; margin: 10px 0; background: #222; padding: 5px; border-radius: 5px;">
+            <div style="font-size: 20px; font-weight: bold; color: #ff3366; margin: 6px 0; background: #222; padding: 4px; border-radius: 5px;">
                 瞬时全速 a: <span id="accel-val">0.00</span> m/s²
             </div>
 
@@ -75,14 +109,19 @@
         const startRecBtn = document.getElementById('startRecBtn');
         const stopRecBtn = document.getElementById('stopRecBtn');
         const avgVal = document.getElementById('avg-val');
+        const globalAvgVal = document.getElementById('global-avg-val');
         const statusHint = document.getElementById('status-hint');
         const fpsDisplay = document.getElementById('fps-display');
         const lrSlider = document.getElementById('lrSlider');
         const vLR = document.getElementById('valLR');
+        
+        // 表格相关节点
+        const tableBody = document.getElementById('table-body');
+        const clearBtn = document.getElementById('clearBtn');
 
-        // 📏 20cm 核心物理标定参数
-        const REAL_DISTANCE_M = 0.20; 
-        const TRACK_PIXELS = 400;     
+        // 📏 【30cm 核心物理标定参数】
+        const REAL_DISTANCE_M = 0.30; 
+        const TRACK_PIXELS = 450;     
         const PX_PER_METER = TRACK_PIXELS / REAL_DISTANCE_M; 
 
         let isTracking = false;
@@ -96,12 +135,15 @@
         let isRecording = false;
         let recordedAccelData = []; 
 
+        // 🧠 统计池：存储多轮实验产生的平均值，用于计算总平均
+        let experimentCount = 0;
+        let allExperimentAvgs = []; 
+
         let chartInstance;
         let chartLabels = Array(40).fill(''); 
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        // 用于计算真实渲染 FPS 的计数器
         let fpsFrameCount = 0;
         let fpsLastTime = performance.now();
 
@@ -122,7 +164,6 @@
             isRecording = true;
             startRecBtn.style.opacity = "0.4"; startRecBtn.disabled = true;
             stopRecBtn.style.opacity = "1"; stopRecBtn.disabled = false;
-            statusHint.innerText = "🔴 高速录制中...请静止等待全0出现再放手。";
             avgVal.innerText = "等待放手";
         });
 
@@ -133,7 +174,6 @@
 
             if (recordedAccelData.length < 5) {
                 avgVal.innerText = "--";
-                statusHint.innerText = "❌ 录制数据过少。";
                 return;
             }
 
@@ -147,11 +187,10 @@
 
             if (motionStartIndex === -1) {
                 avgVal.innerText = "--";
-                statusHint.innerText = "❌ 未检测到放手滑动（数据全程为0）。";
                 return;
             }
 
-            // 根据高帧率自适应：如果FPS大于60，手震期需要留出更多帧（这里保持跳过6帧，可根据高频效果微调）
+            // 智能跨越手震，切出纯净滑行
             let realDataStart = motionStartIndex + 6;
             let stableSegment = recordedAccelData.slice(realDataStart);
 
@@ -163,12 +202,45 @@
             if (stableSegment.length > 0) {
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
+                
+                // 更新当前单次平均值
                 avgVal.innerText = avg.toFixed(2);
-                statusHint.innerText = `🟢 成功结算！已成功抓取黄金段 ${stableSegment.length} 帧数据。`;
+                
+                // 存入多轮统计池并更新总平均
+                allExperimentAvgs.push(avg);
+                experimentCount++;
+                let globalSum = allExperimentAvgs.reduce((a, b) => a + b, 0);
+                let globalAvg = globalSum / allExperimentAvgs.length;
+                globalAvgVal.innerText = globalAvg.toFixed(2);
+
+                // 📊 动态追加数据行到网页表格中
+                if (experimentCount === 1) {
+                    tableBody.innerHTML = ""; // 第一次实验时清空提示语
+                }
+                
+                let formattedRawData = stableSegment.map(v => v.toFixed(2)).join(", ");
+                
+                let rowHtml = `
+                    <tr>
+                        <td>实验 ${experimentCount}</td>
+                        <td class="td-raw">${formattedRawData}</td>
+                        <td style="color:#00f0ff; font-weight:bold;">${avg.toFixed(2)}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += rowHtml;
+
             } else {
                 avgVal.innerText = "--";
-                statusHint.innerText = "❌ 有效滑动帧不足。";
             }
+        });
+
+        // 清空表格
+        clearBtn.addEventListener('click', () => {
+            experimentCount = 0;
+            allExperimentAvgs = [];
+            avgVal.innerText = "--";
+            globalAvgVal.innerText = "--";
+            tableBody.innerHTML = `<tr><td colspan="3" style="color: #666; padding: 15px;">暂无实验数据，等待放手下滑结算...</td></tr>`;
         });
 
         function initChart() {
@@ -202,25 +274,15 @@
 
         startBtn.addEventListener('click', async () => {
             try {
-                // 🌟 【核心解封参数】：强制通过降低分辨率，夹击触发底层硬件的超高帧率流
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         facingMode: "environment",
-                        width: { ideal: 640 },  // 必须把分辨率压在 640x480 内，硬件带宽才足够吐出 60+ FPS
+                        width: { ideal: 640 },  
                         height: { ideal: 480 },
-                        frameRate: { 
-                            min: 60,            // 最低要求 60 帧
-                            ideal: 240          // 理想冲刺 240 帧 (针对部分高刷屏手机)
-                        }
+                        frameRate: { min: 60, ideal: 240 }
                     },
                     audio: false
                 });
-                
-                // 打印当前浏览器最终批准允许的具体配置（用于在控制台Debug查看）
-                const tracks = stream.getVideoTracks();
-                if(tracks.length > 0) {
-                    console.log("成功向手机索取到相机参数：", tracks[0].getSettings());
-                }
 
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
@@ -245,20 +307,17 @@
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
-                alert("摄像头高帧率初始化失败，正在尝试标准模式拉取: " + err.message);
-                // 降级兜底方案
                 try {
                     const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
                     video.srcObject = fallbackStream;
                     startBtn.style.display = 'none'; controls.style.display = 'block'; initChart();
-                } catch(e) { alert("相机彻底不可用。"); }
+                } catch(e) { alert("相机启动失败。"); }
             }
         });
 
         function trackLoop() {
             if (!isTracking) return;
 
-            // 测量实际工作 FPS
             fpsFrameCount++;
             const nowTime = performance.now();
             if (nowTime - fpsLastTime >= 1000) {
@@ -296,9 +355,10 @@
             cv.imshow('canvas', fgmask);
 
             const currentTime = performance.now();
-            const dt = (currentTime - lastTime) / 1000;
+            const dt = (currentTime - 1000) / 1000; 
+            const realDt = (currentTime - lastTime) / 1000;
 
-            if (bestCenter && dt > 0) {
+            if (bestCenter && realDt > 0) {
                 ctx.beginPath();
                 ctx.arc(bestCenter.x, bestCenter.y, 16, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#ff3366';
@@ -310,8 +370,8 @@
                     const dy = bestCenter.y - lastPos.y;
                     const distancePx = Math.sqrt(dx * dx + dy * dy);
 
-                    let currentRealSpeed = distancePx / PX_PER_METER / dt;
-                    let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
+                    let currentRealSpeed = distancePx / PX_PER_METER / realDt;
+                    let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / realDt);
 
                     if (rawAccel > 10.0) {
                         rawAccel = 0.0;
