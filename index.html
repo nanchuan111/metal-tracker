@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>实时追踪加速度</title>
+    <title>物理实验：30cm高频存储结算系统 v25.0</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #1a1a1a; color: #fff; text-align: center; }
         #container { position: relative; width: 100vw; height: 35vh; max-width: 640px; margin: 0 auto; background: #000; }
@@ -15,22 +15,15 @@
         .btn-action { padding: 10px 18px; font-size: 14px; font-weight: bold; border: none; border-radius: 20px; cursor: pointer; }
         #startRecBtn { background: #ff3366; color: #fff; }
         #stopRecBtn { background: #ffaa00; color: #000; }
-        
-        #avg-display { font-size: 20px; color: #00f0ff; margin-top: 6px; font-weight: bold; background: #111; padding: 6px; border-radius: 6px; border: 1px solid #00f0ff; }
-        #global-avg-display { font-size: 22px; color: #00ff66; margin-top: 4px; font-weight: bold; background: #111; padding: 6px; border-radius: 6px; border: 1px solid #00ff66; }
+        #avg-display { font-size: 22px; color: #00f0ff; margin-top: 6px; font-weight: bold; background: #111; padding: 8px; border-radius: 6px; border: 1px solid #00f0ff; }
 
-       
-        #table-panel { background: #1e1e1e; padding: 10px; border-radius: 8px; margin-top: 10px; border: 1px solid #444; text-align: left; }
-        .table-wrapper { width: 100%; overflow-x: auto; margin-top: 6px; border-radius: 4px; }
-        table { width: 100%; border-collapse: collapse; background: #111; font-size: 12px; color: #ccc; min-width: 450px; }
-        th, td { padding: 8px; border: 1px solid #333; text-align: center; }
-        th { background: #252525; color: #ffaa00; }
-        tr:nth-child(even) { background: #181818; }
-        .td-raw { text-align: left; font-family: monospace; font-size: 11px; color: #00ff66; word-break: break-all; max-width: 220px; }
+        /* 💾 存储数据面板样式 */
+        #storage-panel { background: #1e1e1e; padding: 10px; border-radius: 8px; margin-top: 8px; border: 1px solid #555; text-align: left; }
+        #data-log { width: 100%; height: 60px; background: #111; color: #00ff66; border: 1px solid #333; border-radius: 4px; padding: 5px; box-sizing: border-box; font-family: monospace; font-size: 11px; margin-top: 5px; overflow-y: auto; white-space: normal; word-break: break-all; }
 
         .slider-container { display: flex; flex-direction: column; align-items: center; font-size: 12px; color: #ccc; margin: 6px 0; }
         input[type=range] { width: 85%; margin-top: 2px; }
-        #chart-container { width: 95%; max-width: 600px; height: 105px; margin: 5px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
+        #chart-container { width: 95%; max-width: 600px; height: 110px; margin: 5px auto; background: #1e1e1e; border-radius: 8px; padding: 5px; border: 1px solid #444; }
         #loading { color: #ffcc00; font-weight: bold; margin: 10px; }
     </style>
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
@@ -38,7 +31,7 @@
 </head>
 <body>
 
-    <div id="loading">正在加载...</div>
+    <div id="loading">正在加载 30cm 锁定高频存储结算引擎...</div>
 
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
@@ -50,36 +43,21 @@
         
         <div id="controls" style="display:none;">
             <div id="record-console">
-                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">⚡ 相机工作帧率: <span id="fps-display">--</span> FPS | 标定长: 30cm</div>
+                <div style="font-size: 13px; color: #00ff66; font-weight: bold;">⚡ 相机当前工作帧率: <span id="fps-display">--</span> FPS</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
-                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 智能检索并结算</button>
+                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹ nighttime 智能检索并结算</button>
                 </div>
-                <div id="avg-display">📊 当前单次滑行平均 a: <span id="avg-val">--</span> m/s²</div>
-                <div id="global-avg-display">🎯 历史累计所有实验总平均 a: <span id="global-avg-val">--</span> m/s²</div>
+                <div id="avg-display">📊 30cm 滑行段平均 a: <span id="avg-val">--</span> m/s²</div>
+                <div id="status-hint" style="font-size:11px; color:#aaa; margin-top:4px;">标定物理滑行总长: 30cm (0.30 米)</div>
             </div>
 
-            <div id="table-panel">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size: 13px; color: #ffaa00; font-weight: bold;">📋 物理实验多轮数据统计表</span>
-                    <button id="clearBtn" style="padding: 2px 8px; font-size: 11px; background: #444; color: #ff3366; border: 1px solid #555; border-radius: 4px; cursor: pointer;">清空表格</button>
+            <div id="storage-panel">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: #ffaa00; font-weight: bold;">📋 黄金下滑段原始数据池 (单位: m/s²)</span>
+                    <button id="copyBtn" style="padding: 2px 8px; font-size: 11px; font-weight: bold; background: #444; color: #fff; border: 1px solid #666; border-radius: 4px; cursor: pointer;">复制这组数据</button>
                 </div>
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="width: 15%;">序号</th>
-                                <th style="width: 55%;">本轮存的a(m/s²)</th>
-                                <th style="width: 30%;">本轮平均 a</th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-body">
-                            <tr>
-                                <td colspan="3" style="color: #666; padding: 15px;">暂无实验数据，等待放手下滑结算...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <div id="data-log">暂无暂存数据，请完成一次滑动结算...</div>
             </div>
 
             <div class="slider-container" style="background:#1e1e1e; padding:5px; border-radius:8px; margin-top:8px;">
@@ -87,7 +65,7 @@
                 <input type="range" id="lrSlider" min="0" max="100" value="0" style="width:90%;">
             </div>
             
-            <div style="font-size: 20px; font-weight: bold; color: #ff3366; margin: 6px 0; background: #222; padding: 4px; border-radius: 5px;">
+            <div style="font-size: 22px; font-weight: bold; color: #ff3366; margin: 8px 0; background: #222; padding: 4px; border-radius: 5px;">
                 瞬时全速 a: <span id="accel-val">0.00</span> m/s²
             </div>
 
@@ -109,19 +87,18 @@
         const startRecBtn = document.getElementById('startRecBtn');
         const stopRecBtn = document.getElementById('stopRecBtn');
         const avgVal = document.getElementById('avg-val');
-        const globalAvgVal = document.getElementById('global-avg-val');
         const statusHint = document.getElementById('status-hint');
         const fpsDisplay = document.getElementById('fps-display');
         const lrSlider = document.getElementById('lrSlider');
         const vLR = document.getElementById('valLR');
         
-        // 表格相关节点
-        const tableBody = document.getElementById('table-body');
-        const clearBtn = document.getElementById('clearBtn');
+        // 存储节点
+        const dataLog = document.getElementById('data-log');
+        const copyBtn = document.getElementById('copyBtn');
 
-        // 📏 【30cm 核心物理标定参数】
-        const REAL_DISTANCE_M = 0.30; 
-        const TRACK_PIXELS = 450;     
+        // 📏 【30cm 核心物理标定参数修正】
+        const REAL_DISTANCE_M = 0.30; // 真实滑行距离 30cm = 0.30米
+        const TRACK_PIXELS = 450;     // 画面中这 30cm 对应的像素跨度 (默认假设占满画面的3分之2，可微调)
         const PX_PER_METER = TRACK_PIXELS / REAL_DISTANCE_M; 
 
         let isTracking = false;
@@ -134,10 +111,6 @@
 
         let isRecording = false;
         let recordedAccelData = []; 
-
-        // 🧠 统计池：存储多轮实验产生的平均值，用于计算总平均
-        let experimentCount = 0;
-        let allExperimentAvgs = []; 
 
         let chartInstance;
         let chartLabels = Array(40).fill(''); 
@@ -164,7 +137,9 @@
             isRecording = true;
             startRecBtn.style.opacity = "0.4"; startRecBtn.disabled = true;
             stopRecBtn.style.opacity = "1"; stopRecBtn.disabled = false;
+            statusHint.innerText = "🔴 高速引擎录制中...请静止等待全0出现再放手。";
             avgVal.innerText = "等待放手";
+            dataLog.innerText = "采集数据中...";
         });
 
         stopRecBtn.addEventListener('click', () => {
@@ -174,6 +149,7 @@
 
             if (recordedAccelData.length < 5) {
                 avgVal.innerText = "--";
+                statusHint.innerText = "❌ 录制数据过少。";
                 return;
             }
 
@@ -187,60 +163,44 @@
 
             if (motionStartIndex === -1) {
                 avgVal.innerText = "--";
+                statusHint.innerText = "❌ 未检测到放手滑动（数据全程为0）。";
                 return;
             }
 
-            // 智能跨越手震，切出纯净滑行
+            // 跨越放手手震期，直奔纯净下滑段
             let realDataStart = motionStartIndex + 6;
             let stableSegment = recordedAccelData.slice(realDataStart);
 
+            // 过滤并修剪触底反弹段
             stableSegment = stableSegment.filter(x => x > 0.1); 
             if (stableSegment.length > 4) {
                 stableSegment = stableSegment.slice(0, -2); 
             }
 
+            // 精准均值计算并展示裸数据
             if (stableSegment.length > 0) {
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
-                
-                // 更新当前单次平均值
                 avgVal.innerText = avg.toFixed(2);
+                statusHint.innerText = `🟢 成功结算！抓取 30cm 滑动黄金段共 ${stableSegment.length} 帧数据。`;
                 
-                // 存入多轮统计池并更新总平均
-                allExperimentAvgs.push(avg);
-                experimentCount++;
-                let globalSum = allExperimentAvgs.reduce((a, b) => a + b, 0);
-                let globalAvg = globalSum / allExperimentAvgs.length;
-                globalAvgVal.innerText = globalAvg.toFixed(2);
-
-                // 动态追加数据行到网页表格中
-                if (experimentCount === 1) {
-                    tableBody.innerHTML = ""; // 第一次实验时清空提示语
-                }
-                
-                let formattedRawData = stableSegment.map(v => v.toFixed(2)).join(", ");
-                
-                let rowHtml = `
-                    <tr>
-                        <td>实验 ${experimentCount}</td>
-                        <td class="td-raw">${formattedRawData}</td>
-                        <td style="color:#00f0ff; font-weight:bold;">${avg.toFixed(2)}</td>
-                    </tr>
-                `;
-                tableBody.innerHTML += rowHtml;
-
+                // 💾 存储原始数组数据到面板
+                let formattedData = stableSegment.map(v => v.toFixed(2));
+                dataLog.innerText = formattedData.join(", ");
             } else {
                 avgVal.innerText = "--";
+                statusHint.innerText = "❌ 有效滑动段数据帧不足。";
+                dataLog.innerText = "未抓取到有效段";
             }
         });
 
-        // 清空表格
-        clearBtn.addEventListener('click', () => {
-            experimentCount = 0;
-            allExperimentAvgs = [];
-            avgVal.innerText = "--";
-            globalAvgVal.innerText = "--";
-            tableBody.innerHTML = `<tr><td colspan="3" style="color: #666; padding: 15px;">暂无实验数据，等待放手下滑结算...</td></tr>`;
+        // 一键复制裸数据功能
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(dataLog.innerText).then(() => {
+                alert("💾 原始加速度数据包已复制到剪贴板！可以直接去粘贴了。");
+            }).catch(() => {
+                alert("复制失败，请手动在框内长按全选复制。");
+            });
         });
 
         function initChart() {
@@ -307,6 +267,7 @@
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
+                // 降级兜底方案
                 try {
                     const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
                     video.srcObject = fallbackStream;
@@ -355,10 +316,9 @@
             cv.imshow('canvas', fgmask);
 
             const currentTime = performance.now();
-            const dt = (currentTime - 1000) / 1000; 
-            const realDt = (currentTime - lastTime) / 1000;
+            const dt = (currentTime - lastTime) / 1000;
 
-            if (bestCenter && realDt > 0) {
+            if (bestCenter && dt > 0) {
                 ctx.beginPath();
                 ctx.arc(bestCenter.x, bestCenter.y, 16, 0, 2 * Math.PI);
                 ctx.strokeStyle = '#ff3366';
@@ -370,8 +330,8 @@
                     const dy = bestCenter.y - lastPos.y;
                     const distancePx = Math.sqrt(dx * dx + dy * dy);
 
-                    let currentRealSpeed = distancePx / PX_PER_METER / realDt;
-                    let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / realDt);
+                    let currentRealSpeed = distancePx / PX_PER_METER / dt;
+                    let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / dt);
 
                     if (rawAccel > 10.0) {
                         rawAccel = 0.0;
