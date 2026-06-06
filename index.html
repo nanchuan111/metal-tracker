@@ -48,14 +48,14 @@
     </div>
 
     <div id="dashboard">
-        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">原神启动</button>
+        <button id="startBtn" style="display:none; padding: 12px 25px; font-size: 16px; background: #ff3366; color: #fff; border: none; border-radius: 25px; font-weight: bold; cursor: pointer;">启动</button>
         
         <div id="controls" style="display:none;">
             <div id="record-console">
                 <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">📐 实验标定基准长: 30cm</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
-                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 智能检索并结算</button>
+                    <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 检索并结算平均值</button>
                 </div>
                 <div id="avg-display">📊 当前单次滑行平均 a: <span id="avg-val">--</span> m/s²</div>
                 <div id="global-avg-display">🎯 历史累计所有实验总平均 a: <span id="global-avg-val">--</span> m/s²</div>
@@ -71,7 +71,7 @@
                         <thead>
                             <tr>
                                 <th style="width: 15%;">序号</th>
-                                <th style="width: 50%;">本轮有效a(m/s²)</th>
+                                <th style="width: 50%;">本轮存的a(m/s²)</th>
                                 <th style="width: 23%;">本轮平均 a</th>
                                 <th style="width: 12%;">操作</th>
                             </tr>
@@ -161,19 +161,16 @@
             avgVal.innerText = "等待放手";
         });
 
-        // ⏹️ 智能检索与科学结算机制（全速弹性消噪版）
         stopRecBtn.addEventListener('click', () => {
             isRecording = false;
             startRecBtn.style.opacity = "1"; startRecBtn.disabled = false;
             stopRecBtn.style.opacity = "0.4"; stopRecBtn.disabled = true;
 
-            // 基础帧数判限（由于不锁帧，全速采集样本量增多，提升基准门槛到 20 帧）
-            if (recordedAccelData.length < 20) {
+            if (recordedAccelData.length < 5) {
                 avgVal.innerText = "--";
                 return;
             }
 
-            // 1. 自动定位动作触发起点
             let motionStartIndex = -1;
             for (let i = 0; i < recordedAccelData.length; i++) {
                 if (recordedAccelData[i] > 0.15) {
@@ -187,21 +184,15 @@
                 return;
             }
 
-            
-            let realDataStart = motionStartIndex + 10;
-            let rawSegment = recordedAccelData.slice(realDataStart);
+            // 原汁原味保留基准代码中的数据切片过滤逻辑
+            let realDataStart = motionStartIndex + 6;
+            let stableSegment = recordedAccelData.slice(realDataStart);
 
-            
-            let physicsFiltered = rawSegment.filter(x => x >= 0.2 && x <= 4.9);
-
-            
-            let stableSegment = [];
-            for (let i = 1; i < physicsFiltered.length - 1; i++) {
-                let smoothValue = (physicsFiltered[i-1] + physicsFiltered[i] + physicsFiltered[i+1]) / 3;
-                stableSegment.push(smoothValue);
+            stableSegment = stableSegment.filter(x => x > 0.1); 
+            if (stableSegment.length > 4) {
+                stableSegment = stableSegment.slice(0, -2); 
             }
 
-            
             if (stableSegment.length > 0) {
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
@@ -300,6 +291,7 @@
 
         startBtn.addEventListener('click', async () => {
             try {
+                // 解开相机设备的理想帧率上限限制
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         facingMode: "environment",
@@ -339,7 +331,7 @@
             }
         });
 
-        // 🚀 全速循环流 (不加入任何时间节流拦截器，由系统自动跑满硬件帧率)
+        // 🚀 原生帧率追踪主循环 
         function trackLoop() {
             if (!isTracking) return;
 
@@ -390,7 +382,7 @@
                     let currentRealSpeed = distancePx / PX_PER_METER / realDt;
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / realDt);
 
-                    if (rawAccel > 12.0) {
+                    if (rawAccel > 10.0) {
                         rawAccel = 0.0;
                     }
 
