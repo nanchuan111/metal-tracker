@@ -52,7 +52,7 @@
         
         <div id="controls" style="display:none;">
             <div id="record-console">
-                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">⚡ 相机锁定帧率: <span id="fps-display">--</span> / 45 FPS | 标定长: 30cm</div>
+                <div style="font-size: 13px; color: #ffaa00; font-weight: bold;">📐 实验标定基准长: 30cm</div>
                 <div class="btn-group">
                     <button id="startRecBtn" class="btn-action">▶️ 开始捕获数据</button>
                     <button id="stopRecBtn" class="btn-action" style="opacity: 0.4;" disabled>⏹️ 智能检索并结算</button>
@@ -71,7 +71,7 @@
                         <thead>
                             <tr>
                                 <th style="width: 15%;">序号</th>
-                                <th style="width: 50%;">本轮存的a(m/s²)</th>
+                                <th style="width: 50%;">本轮有效a(m/s²)</th>
                                 <th style="width: 23%;">本轮平均 a</th>
                                 <th style="width: 12%;">操作</th>
                             </tr>
@@ -113,7 +113,6 @@
         const stopRecBtn = document.getElementById('stopRecBtn');
         const avgVal = document.getElementById('avg-val');
         const globalAvgVal = document.getElementById('global-avg-val');
-        const fpsDisplay = document.getElementById('fps-display');
         const lrSlider = document.getElementById('lrSlider');
         const vLR = document.getElementById('valLR');
         
@@ -142,13 +141,6 @@
         let chartData = Array(40).fill(0);   
         let lastChartUpdateTime = performance.now();
 
-        let fpsFrameCount = 0;
-        let fpsLastTime = performance.now();
-
-        // ⏱️ 锁45帧机制核心：1000ms / 45帧 = 22.22ms 最小间隔
-        const FRAME_INTERVAL = 1000 / 45;
-        let lastFrameRenderTime = performance.now();
-
         let src, gray, fgmask, bgSubtractor, contours, hierarchy;
 
         function onOpenCvReady() {
@@ -169,16 +161,19 @@
             avgVal.innerText = "等待放手";
         });
 
+        // ⏹️ 智能检索与科学结算机制（全速弹性消噪版）
         stopRecBtn.addEventListener('click', () => {
             isRecording = false;
             startRecBtn.style.opacity = "1"; startRecBtn.disabled = false;
             stopRecBtn.style.opacity = "0.4"; stopRecBtn.disabled = true;
 
-            if (recordedAccelData.length < 5) {
+            // 基础帧数判限（由于不锁帧，全速采集样本量增多，提升基准门槛到 20 帧）
+            if (recordedAccelData.length < 20) {
                 avgVal.innerText = "--";
                 return;
             }
 
+            // 1. 自动定位动作触发起点
             let motionStartIndex = -1;
             for (let i = 0; i < recordedAccelData.length; i++) {
                 if (recordedAccelData[i] > 0.15) {
@@ -192,14 +187,21 @@
                 return;
             }
 
-            let realDataStart = motionStartIndex + 6;
-            let stableSegment = recordedAccelData.slice(realDataStart);
+            // 🔒 策略一：全速下跳过前 18 帧，彻底剥离人手在下滑初期带来的推力、速度瞬时干扰和倒影形变
+            let realDataStart = motionStartIndex + 18;
+            let rawSegment = recordedAccelData.slice(realDataStart);
 
-            stableSegment = stableSegment.filter(x => x > 0.1); 
-            if (stableSegment.length > 4) {
-                stableSegment = stableSegment.slice(0, -2); 
+            // 🔒 策略二：30度斜面经典力学极限上限拦截（卡死 4.9），将所有冰面凹凸引起的抖动像素跳跃直接剔除
+            let physicsFiltered = rawSegment.filter(x => x >= 0.2 && x <= 4.9);
+
+            // 🔒 策略三：全速域滑动窗口滤波器（跨度3帧），平滑消化冰面微小颗粒导致的无规律颠簸噪声
+            let stableSegment = [];
+            for (let i = 1; i < physicsFiltered.length - 1; i++) {
+                let smoothValue = (physicsFiltered[i-1] + physicsFiltered[i] + physicsFiltered[i+1]) / 3;
+                stableSegment.push(smoothValue);
             }
 
+            // 2. 最终渲染输出
             if (stableSegment.length > 0) {
                 let sum = stableSegment.reduce((a, b) => a + b, 0);
                 let avg = sum / stableSegment.length;
@@ -298,13 +300,11 @@
 
         startBtn.addEventListener('click', async () => {
             try {
-                // 🔒 1. 硬件层限制：请求相机的理想和最大帧率均为 45 帧
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         facingMode: "environment",
                         width: { ideal: 640 },  
-                        height: { ideal: 480 },
-                        frameRate: { ideal: 45, max: 45 }
+                        height: { ideal: 480 }
                     },
                     audio: false
                 });
@@ -328,8 +328,6 @@
 
                     isTracking = true;
                     lastTime = performance.now();
-                    fpsLastTime = performance.now();
-                    lastFrameRenderTime = performance.now();
                     requestAnimationFrame(trackLoop);
                 };
             } catch (err) {
@@ -341,28 +339,11 @@
             }
         });
 
+        // 🚀 全速循环流 (不加入任何时间节流拦截器，由系统自动跑满硬件帧率)
         function trackLoop() {
             if (!isTracking) return;
 
-            // 🔒 2. 软件算法节流拦截：若当前刷新间隔小于目标 22.22ms，则放弃本帧执行，等待下一次循环
             const currentTime = performance.now();
-            const elapsed = currentTime - lastFrameRenderTime;
-
-            if (elapsed < FRAME_INTERVAL) {
-                requestAnimationFrame(trackLoop);
-                return;
-            }
-
-            // 更新上一次成功渲染的时间基准线并吸收尾数微小偏差
-            lastFrameRenderTime = currentTime - (elapsed % FRAME_INTERVAL);
-
-            // FPS 指数计算与刷新
-            fpsFrameCount++;
-            if (currentTime - fpsLastTime >= 1000) {
-                fpsDisplay.innerText = fpsFrameCount;
-                fpsFrameCount = 0;
-                fpsLastTime = currentTime;
-            }
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -409,7 +390,7 @@
                     let currentRealSpeed = distancePx / PX_PER_METER / realDt;
                     let rawAccel = Math.abs((currentRealSpeed - lastVelocity) / realDt);
 
-                    if (rawAccel > 10.0) {
+                    if (rawAccel > 12.0) {
                         rawAccel = 0.0;
                     }
 
